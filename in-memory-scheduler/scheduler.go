@@ -154,7 +154,7 @@ func (s *Scheduler) StartWorker(w *Worker) {
 	go func() {
 		defer s.goroutines.Add(-1)
 		defer s.wg.Done()
-		w.Loop()
+		w.Start()
 	}()
 }
 

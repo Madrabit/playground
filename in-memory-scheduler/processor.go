@@ -11,13 +11,18 @@ func NewPrintProcessor() Processor {
 	return &PrintProcessor{}
 }
 
-func (print *PrintProcessor) Process(job Job) (JobStatus, error) {
+func (print *PrintProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
 	//fmt.Printf("pid:%d", job.ID)
-	x := job.ID + 1
-	if x%10 == 0 {
-		return Done, nil
+	select {
+	case <-cancel:
+		return Cancelled, nil
+	case <-time.After(time.Second):
+		x := job.ID + 1
+		if x%10 == 0 {
+			return Done, nil
+		}
+		return Pending, nil
 	}
-	return Pending, nil
 }
 
 type SleepProcessor struct {
@@ -28,17 +33,25 @@ func NewSleepProcessor() Processor {
 	return &SleepProcessor{}
 }
 
-func (p *SleepProcessor) Process(job Job) (JobStatus, error) {
-	time.Sleep(1 * time.Second)
-	return Pending, nil
+func (p *SleepProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+	select {
+	case <-cancel:
+		return Cancelled, nil
+	case <-time.After(time.Second):
+		time.Sleep(1 * time.Second)
+		return Pending, nil
+	}
 }
 
 type FailProcessor struct{}
 
 func NewFailProcessor() Processor { return &FailProcessor{} }
 
-func (p *FailProcessor) Process(job Job) (JobStatus, error) {
-	{
+func (p *FailProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+	select {
+	case <-cancel:
+		return Cancelled, nil
+	case <-time.After(time.Second):
 		fmt.Printf("Proccess ID: %d", job.ID)
 		return Failed, fmt.Errorf("job: %d failed %w", job.ID, ErrFailedProcess)
 	}
@@ -86,8 +99,10 @@ func NewHangingProcessor() Processor {
 	return &HangingProcessor{stop: make(chan struct{})}
 }
 
-func (h *HangingProcessor) Process(job Job) (JobStatus, error) {
+func (h *HangingProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
 	select {
+	case <-cancel:
+		return Cancelled, nil
 	case <-h.stop:
 		return Done, nil
 	default:

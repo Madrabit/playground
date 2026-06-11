@@ -14,10 +14,11 @@ type Worker struct {
 	processor Processor
 	wg        sync.WaitGroup
 	heartBeat chan<- HeartBeat
+	once      sync.Once
 }
 
 type Processor interface {
-	Process(job Job) (JobStatus, error)
+	Process(job Job, cancel <-chan struct{}) (JobStatus, error)
 }
 
 func NewWorker(ID int, results chan<- Results, processor Processor, heartBeat chan<- HeartBeat) *Worker {
@@ -32,7 +33,6 @@ func NewWorker(ID int, results chan<- Results, processor Processor, heartBeat ch
 }
 
 func (w *Worker) Loop() {
-	go w.CheckHealth()
 	for {
 		select {
 		case <-w.stop:
@@ -71,7 +71,7 @@ func (w *Worker) Loop() {
 
 //go:noinline
 func (w *Worker) Process(j Job, cancel <-chan struct{}) (JobStatus, error) {
-	process, err := w.processor.Process(j)
+	process, err := w.processor.Process(j, cancel)
 	return process, err
 }
 
@@ -93,4 +93,11 @@ func (w *Worker) CheckHealth() {
 			w.heartBeat <- HeartBeat{w.ID, time.Now()}
 		}
 	}
+}
+
+func (w *Worker) Start() {
+	w.once.Do(func() {
+		go w.CheckHealth()
+		go w.Loop()
+	})
 }
