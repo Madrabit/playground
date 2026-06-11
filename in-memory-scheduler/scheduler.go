@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,17 +11,22 @@ import (
 )
 
 type Scheduler struct {
-	queue      *JobsQueue
-	admin      StoreAdmin
-	debug      StoreDebug
-	reader     StoreReader
-	writer     StoreWriter
-	mu         sync.Mutex
-	workers    []*Worker
-	stop       chan struct{}
-	roundRobin uint64
-	results    chan Results
-	processor  Processor
+	queue         *JobsQueue
+	admin         StoreAdmin
+	debug         StoreDebug
+	reader        StoreReader
+	writer        StoreWriter
+	mu            sync.Mutex
+	workers       []*Worker
+	stop          chan struct{}
+	roundRobin    uint64
+	results       chan Results
+	processor     Processor
+	wg            sync.WaitGroup
+	goroutines    atomic.Int64
+	validator     *Validator
+	activeWorkers map[int]time.Time
+	heartBeat     chan HeartBeat
 }
 
 type Results struct {
@@ -32,16 +38,40 @@ type Results struct {
 func NewScheduler(processor Processor) *Scheduler {
 	queue := NewJobsQueue()
 	storage := NewStorage()
+	validator := NewValidator()
 	return &Scheduler{
-		queue:     queue,
-		admin:     storage,
-		debug:     storage,
-		reader:    storage,
-		writer:    storage,
-		stop:      make(chan struct{}),
-		results:   make(chan Results, 1024),
-		processor: processor,
+		queue:         queue,
+		admin:         storage,
+		debug:         storage,
+		reader:        storage,
+		writer:        storage,
+		stop:          make(chan struct{}),
+		results:       make(chan Results, 1024),
+		processor:     processor,
+		validator:     validator,
+		activeWorkers: map[int]time.Time{},
+		heartBeat:     make(chan HeartBeat, 1024),
 	}
+}
+
+const workers = 1024
+
+func (s *Scheduler) Start() {
+	s.StartWorkers(workers)
+	s.StartValidator()
+	go func() {
+		for w := range s.heartBeat {
+			s.activeWorkers[w.jobId] = w.LastSeen
+		}
+	}()
+}
+
+func (s *Scheduler) Stop() {
+	close(s.stop)
+	for _, w := range s.workers {
+		s.StopWorker(w)
+	}
+	s.wg.Wait()
 }
 
 func (s *Scheduler) Add(j Job) error {
@@ -68,35 +98,27 @@ func (s *Scheduler) StartWorkers(n int) {
 	)(s.processor)
 
 	for i := 0; i < n; i++ {
-		w := NewWorker(i, s.results, processor)
+		w := NewWorker(i, s.results, processor, s.heartBeat)
 		s.workers[i] = w
 	}
-
 	for _, w := range s.workers {
-		w.Start()
+		s.StartWorker(w)
 	}
 
-	/*
-		кто запускает? шедулер
-		кто останавливает? никто
-		кто ждёт завершения? никто
-		что будет при Stop()? перестанут генериться новые воркеры
-	*/
-	go s.DispatchLoop()
-	/*
-		   кто запускает? шедулер
-			кто останавливает? никто
-			кто ждёт завершения? никто
-		   что будет при Stop()? перестанут обрабатываться результаты из воркеров
-	*/
-	go s.handleResults()
-}
-
-func (s *Scheduler) Stop() {
-	close(s.stop)
-	for _, w := range s.workers {
-		w.Stop()
-	}
+	go func() {
+		s.wg.Add(1)
+		s.goroutines.Add(1)
+		defer s.wg.Done()
+		defer s.goroutines.Add(-1)
+		s.DispatchLoop()
+	}()
+	go func() {
+		s.wg.Add(1)
+		s.goroutines.Add(1)
+		defer s.wg.Done()
+		defer s.goroutines.Add(-1)
+		s.handleResults()
+	}()
 }
 
 func (s *Scheduler) DispatchLoop() {
@@ -120,6 +142,37 @@ func (s *Scheduler) DispatchLoop() {
 		job.State = Running
 		worker.Enqueue(job)
 	}
+}
+
+func (s *Scheduler) StartWorker(w *Worker) {
+	s.wg.Add(1)
+	s.goroutines.Add(1)
+	go func() {
+		defer s.goroutines.Add(-1)
+		defer s.wg.Done()
+		w.Loop()
+	}()
+}
+
+func (s *Scheduler) StopWorker(w *Worker) {
+	close(w.stop)
+}
+
+func (s *Scheduler) StartValidator() {
+	go func() {
+		s.validator.Loop()
+	}()
+	go func() {
+		for e := range s.validator.ErrChan() {
+			if e != nil {
+				log.Println(e)
+			}
+		}
+	}()
+}
+
+func (s *Scheduler) StopValidator() {
+	s.validator.Stop()
 }
 
 func (s *Scheduler) handleResults() {
@@ -151,52 +204,33 @@ func (s *Scheduler) pickWorker() *Worker {
 	return s.workers[i%uint64(len(s.workers))]
 }
 
-func (s *Scheduler) ValidateAsync() []error {
-	errorsChan := make(chan error, 1024)
-	ids := s.reader.ListIDs()
+func (s *Scheduler) ProcessBatch(ids []int) []error {
 	var wg sync.WaitGroup
-	wg.Add(len(ids))
+	var errChan = make(chan error, 1024)
 	var errs []error
-	for _, id := range ids {
-		job, err := s.reader.GetByID(id)
-		if err != nil {
-			errorsChan <- fmt.Errorf("scheduler validation error: job id: %d, %w", id, ErrJobNotFound)
-			wg.Done()
-			continue
-		}
-		jobCopy := job
-
-		go func(j Job) {
+	for _, jobId := range ids {
+		id := jobId
+		wg.Add(1)
+		go func() {
 			defer wg.Done()
-			err := ValidateJob(j)
+			job, err := s.reader.GetByID(id)
 			if err != nil {
-				errorsChan <- fmt.Errorf("scheduler validation error: job id: %d, %w", j.ID, err)
+				errChan <- fmt.Errorf("scheduler process batch: job id: %d, %w", id, ErrJobNotFound)
+				return
 			}
-		}(jobCopy)
+			if _, ok := job.Tags["fatal"]; ok {
+				errChan <- fmt.Errorf("scheduler process batch: job id: %d, %w", job.ID, ErrProcessAborted)
+				return
+			}
+			if _, ok := job.Tags["skip"]; ok {
+				return
+			}
+		}()
 	}
 	wg.Wait()
-	close(errorsChan)
-	for e := range errorsChan {
-		errs = append(errs, e)
-	}
-	return errs
-}
-
-func (s *Scheduler) ProcessBatch(ids []int) []error {
-	var errs []error
-	for _, id := range ids {
-		job, err := s.reader.GetByID(id)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("scheduler process batch: job id: %d, %w", id, ErrJobNotFound))
-			continue
-		}
-		if _, ok := job.Tags["fatal"]; ok {
-			errs = append(errs, fmt.Errorf("scheduler process batch: job id: %d, %w", job.ID, ErrProcessAborted))
-			break
-		}
-		if _, ok := job.Tags["skip"]; ok {
-			continue
-		}
+	close(errChan)
+	for err := range errChan {
+		errs = append(errs, err)
 	}
 	return errs
 }
@@ -291,4 +325,26 @@ func (s *Scheduler) GetById(ID int) (Job, error) {
 		return Job{}, fmt.Errorf("scheduler GetById: jobID %d %w", ID, err)
 	}
 	return job, nil
+}
+
+func (s *Scheduler) ValidateAsync() {
+	ids := s.reader.ListIDs()
+	for _, id := range ids {
+		job, err := s.reader.GetByID(id)
+		if err != nil {
+			continue
+		}
+		jobCopy := job
+		go func(j Job) {
+			s.validator.Validate(j)
+		}(jobCopy)
+	}
+}
+
+func (s *Scheduler) ActiveWorkers() []int {
+	active := make([]int, 0)
+	for k, _ := range s.activeWorkers {
+		active = append(active, k)
+	}
+	return active
 }

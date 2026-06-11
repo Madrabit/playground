@@ -77,3 +77,20 @@ func DebugProcessor(p Processor) {
 		fmt.Println("PrintProcessor")
 	}
 }
+
+type HangingProcessor struct {
+	stop chan struct{}
+}
+
+func NewHangingProcessor() Processor {
+	return &HangingProcessor{stop: make(chan struct{})}
+}
+
+func (h *HangingProcessor) Process(job Job) (JobStatus, error) {
+	select {
+	case <-h.stop:
+		return Done, nil
+	default:
+		return Pending, nil
+	}
+}
