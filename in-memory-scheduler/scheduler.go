@@ -16,7 +16,7 @@ type Scheduler struct {
 	debug         StoreDebug
 	reader        StoreReader
 	writer        StoreWriter
-	mu            sync.Mutex
+	mu            sync.RWMutex
 	workers       []*Worker
 	stop          chan struct{}
 	roundRobin    uint64
@@ -27,6 +27,7 @@ type Scheduler struct {
 	validator     *Validator
 	activeWorkers map[int]time.Time
 	heartBeat     chan HeartBeat
+	cpus          int
 }
 
 type Results struct {
@@ -35,7 +36,7 @@ type Results struct {
 	Error error
 }
 
-func NewScheduler(processor Processor) *Scheduler {
+func NewScheduler(processor Processor, cpus int) *Scheduler {
 	queue := NewJobsQueue()
 	storage := NewStorage()
 	validator := NewValidator()
@@ -51,17 +52,19 @@ func NewScheduler(processor Processor) *Scheduler {
 		validator:     validator,
 		activeWorkers: map[int]time.Time{},
 		heartBeat:     make(chan HeartBeat, 1024),
+		mu:            sync.RWMutex{},
+		cpus:          cpus,
 	}
 }
 
-const workers = 1024
-
 func (s *Scheduler) Start() {
-	s.StartWorkers(workers)
+	s.StartWorkers(s.cpus)
 	s.StartValidator()
 	go func() {
 		for w := range s.heartBeat {
+			s.mu.Lock()
 			s.activeWorkers[w.jobId] = w.LastSeen
+			s.mu.Unlock()
 		}
 	}()
 }
@@ -71,6 +74,7 @@ func (s *Scheduler) Stop() {
 	for _, w := range s.workers {
 		s.StopWorker(w)
 	}
+	s.StopValidator()
 	s.wg.Wait()
 }
 
@@ -90,8 +94,9 @@ func (s *Scheduler) AddAndLog(j Job) error {
 	return s.Add(j)
 }
 
-func (s *Scheduler) StartWorkers(n int) {
-	s.workers = make([]*Worker, n)
+func (s *Scheduler) StartWorkers(cpus int) {
+	n := cpus * 4
+	s.workers = make([]*Worker, s.cpus*4)
 	processor := Use(
 		LoggingMiddleware,
 		RetryMiddleware(3),
@@ -104,17 +109,16 @@ func (s *Scheduler) StartWorkers(n int) {
 	for _, w := range s.workers {
 		s.StartWorker(w)
 	}
-
+	s.wg.Add(1)
+	s.goroutines.Add(1)
 	go func() {
-		s.wg.Add(1)
-		s.goroutines.Add(1)
 		defer s.wg.Done()
 		defer s.goroutines.Add(-1)
 		s.DispatchLoop()
 	}()
+	s.wg.Add(1)
+	s.goroutines.Add(1)
 	go func() {
-		s.wg.Add(1)
-		s.goroutines.Add(1)
 		defer s.wg.Done()
 		defer s.goroutines.Add(-1)
 		s.handleResults()
@@ -342,6 +346,8 @@ func (s *Scheduler) ValidateAsync() {
 }
 
 func (s *Scheduler) ActiveWorkers() []int {
+	s.mu.RLock()
+	defer s.mu.Unlock()
 	active := make([]int, 0)
 	for k, _ := range s.activeWorkers {
 		active = append(active, k)

@@ -4,15 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime"
 )
 
 func main() {
+	cpus := runtime.NumCPU()
 	Register("print", NewPrintProcessor)
 	processor, err := CreateProcessor("print")
 	if err != nil {
 		log.Printf("error creating processor %v\n", err)
 	}
-	scheduler := NewScheduler(processor)
+	scheduler := NewScheduler(processor, cpus)
 	err = scheduler.Add(Job{
 		ID:   1,
 		Name: "Test",
@@ -22,22 +24,9 @@ func main() {
 	}
 	job, err := scheduler.reader.GetByID(1)
 	if err == nil {
-		err := ValidateJob(job)
-		var ve *ValidationError
-		if errors.As(err, &ve) {
-			fmt.Println("поле:", ve.Field)
-			fmt.Println("значение:", ve.Value)
-			fmt.Println("причина:", ve.Reason)
-		}
+		scheduler.validator.Validate(job)
 	}
-	errorbutch := scheduler.ValidateAsync()
-	statErr := make(map[string]int)
-	for _, err := range errorbutch {
-		var ve *ValidationError
-		if errors.As(err, &ve) {
-			statErr[ve.Field]++
-		}
-	}
+	scheduler.ValidateAsync()
 
 	err = BadError()
 	if err != nil {

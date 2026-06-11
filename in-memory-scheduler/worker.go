@@ -32,22 +32,29 @@ func NewWorker(ID int, results chan<- Results, processor Processor, heartBeat ch
 }
 
 func (w *Worker) Loop() {
+	go w.CheckHealth()
 	for {
 		select {
 		case <-w.stop:
 			return
 		case job := <-w.jobs:
 			resChan := make(chan Results, 1)
+			cancel := make(chan struct{})
 			go func() {
-				state, err := w.Process(job)
-				resChan <- Results{
+				state, err := w.Process(job, cancel)
+				select {
+				case <-cancel:
+					return
+				case resChan <- Results{
 					job.ID,
 					state,
 					err,
+				}:
 				}
 			}()
 			select {
 			case <-w.stop:
+				close(cancel)
 				return
 			case res := <-resChan:
 				w.results <- res
@@ -63,7 +70,7 @@ func (w *Worker) Loop() {
 }
 
 //go:noinline
-func (w *Worker) Process(j Job) (JobStatus, error) {
+func (w *Worker) Process(j Job, cancel <-chan struct{}) (JobStatus, error) {
 	process, err := w.processor.Process(j)
 	return process, err
 }
