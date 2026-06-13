@@ -35,7 +35,10 @@ type StoreDebug interface {
 
 type Storage struct {
 	jobs map[int]Job
-	mu   sync.RWMutex
+	/*
+		для GetById из забора мапы jobs потому что шарятся данные
+	*/
+	mu sync.RWMutex
 }
 
 func NewStorage() *Storage {

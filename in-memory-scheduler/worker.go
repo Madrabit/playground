@@ -3,7 +3,14 @@ package main
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
+)
+
+const (
+	Busy int32 = iota
+	Idle
+	StoppedWorker
 )
 
 type Worker struct {
@@ -15,6 +22,7 @@ type Worker struct {
 	wg        sync.WaitGroup
 	heartBeat chan<- HeartBeat
 	once      sync.Once
+	state     atomic.Int32
 }
 
 type Processor interface {
@@ -33,13 +41,18 @@ func NewWorker(ID int, results chan<- Results, processor Processor, heartBeat ch
 }
 
 func (w *Worker) Loop() {
+	defer func() {
+		w.state.Store(StoppedWorker)
+	}()
 	for {
+		w.state.Store(Idle)
 		select {
 		case <-w.stop:
 			return
 		case job := <-w.jobs:
 			resChan := make(chan Results, 1)
 			cancel := make(chan struct{})
+			w.state.Store(Busy)
 			go func() {
 				state, err := w.Process(job, cancel)
 				select {
@@ -67,6 +80,7 @@ func (w *Worker) Loop() {
 			}
 		}
 	}
+
 }
 
 //go:noinline
@@ -100,4 +114,16 @@ func (w *Worker) Start() {
 		go w.CheckHealth()
 		go w.Loop()
 	})
+}
+
+func (w *Worker) IsBusy() bool {
+	return w.state.Load() == Busy
+}
+
+func (w *Worker) IsIdle() bool {
+	return w.state.Load() == Idle
+}
+
+func (w *Worker) IsStopped() bool {
+	return w.state.Load() == StoppedWorker
 }

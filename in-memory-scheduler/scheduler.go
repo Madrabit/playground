@@ -10,12 +10,22 @@ import (
 	"time"
 )
 
+type Metrics struct {
+	done      atomic.Uint64
+	failed    atomic.Uint64
+	cancelled atomic.Uint64
+}
+
 type Scheduler struct {
-	queue         *JobsQueue
-	admin         StoreAdmin
-	debug         StoreDebug
-	reader        StoreReader
-	writer        StoreWriter
+	queue  *JobsQueue
+	admin  StoreAdmin
+	debug  StoreDebug
+	reader StoreReader
+	writer StoreWriter
+	/*
+		блокировка для сбора в мапу с разных воркеров activeWorkers
+		а также MoveJob и CloneJob для демонстрационного кода
+	*/
 	mu            sync.RWMutex
 	workers       []*Worker
 	stop          chan struct{}
@@ -25,9 +35,14 @@ type Scheduler struct {
 	wg            sync.WaitGroup
 	goroutines    atomic.Int64
 	validator     *Validator
+	validatorOnce sync.Once
 	activeWorkers map[int]time.Time
 	heartBeat     chan HeartBeat
 	cpus          int
+	cond          *sync.Cond
+	metrics       Metrics
+	storage       *Storage // для имитации бага прямой доступ в структуру
+
 }
 
 type Results struct {
@@ -39,7 +54,6 @@ type Results struct {
 func NewScheduler(processor Processor, cpus int) *Scheduler {
 	queue := NewJobsQueue()
 	storage := NewStorage()
-	validator := NewValidator()
 	return &Scheduler{
 		queue:         queue,
 		admin:         storage,
@@ -49,11 +63,14 @@ func NewScheduler(processor Processor, cpus int) *Scheduler {
 		stop:          make(chan struct{}),
 		results:       make(chan Results, 1024),
 		processor:     processor,
-		validator:     validator,
 		activeWorkers: map[int]time.Time{},
 		heartBeat:     make(chan HeartBeat, 1024),
 		mu:            sync.RWMutex{},
 		cpus:          cpus,
+		cond:          sync.NewCond(&sync.Mutex{}),
+		metrics:       Metrics{},
+		validator:     NewValidator(),
+		validatorOnce: sync.Once{},
 	}
 }
 
@@ -131,12 +148,9 @@ func (s *Scheduler) DispatchLoop() {
 		case <-s.stop:
 			return
 		default:
+
 		}
-		id, ok := s.queue.Pop()
-		if !ok {
-			time.Sleep(time.Millisecond * 50)
-			continue
-		}
+		id := s.queue.Pop()
 		job, err := s.reader.GetByID(id)
 		if err != nil {
 			time.Sleep(time.Millisecond * 50)
@@ -191,8 +205,10 @@ func (s *Scheduler) handleResults() {
 			}
 			if result.Error != nil {
 				job.State = Failed
+				s.metrics.failed.Add(1)
 			} else {
 				job.State = result.State
+				s.metrics.done.Add(1)
 			}
 			err = s.writer.Update(job)
 			if err != nil {
@@ -353,4 +369,38 @@ func (s *Scheduler) ActiveWorkers() []int {
 		active = append(active, k)
 	}
 	return active
+}
+
+func (s *Scheduler) CloseQueue() {
+	s.queue.Close()
+}
+
+type SchedulerStats struct {
+	Done      uint
+	Failed    uint
+	Cancelled uint
+}
+
+func (s *Scheduler) Stats() SchedulerStats {
+	return SchedulerStats{
+		Done:      uint(s.metrics.done.Load()),
+		Failed:    uint(s.metrics.failed.Load()),
+		Cancelled: uint(s.metrics.cancelled.Load()),
+	}
+}
+
+func (s *Scheduler) MoveJob() {
+	s.mu.Lock()
+	s.storage.mu.Lock()
+	fmt.Println("move job")
+	s.storage.mu.Unlock()
+	s.mu.Unlock()
+}
+
+func (s *Scheduler) CloneJob() {
+	s.mu.Lock()
+	s.storage.mu.Lock()
+	fmt.Println("move job")
+	s.storage.mu.Unlock()
+	s.mu.Unlock()
 }
