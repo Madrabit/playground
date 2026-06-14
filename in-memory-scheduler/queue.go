@@ -20,7 +20,12 @@ type JobsQueue struct {
 
 func NewJobsQueue() *JobsQueue {
 	ids := make([]int, maxJobs)
-	return &JobsQueue{ids: ids, capacity: maxJobs, cond: sync.NewCond(&sync.Mutex{})}
+	q := &JobsQueue{
+		ids:      ids,
+		capacity: maxJobs,
+		mu:       sync.Mutex{}}
+	q.cond = sync.NewCond(&q.mu)
+	return q
 }
 
 func (jb *JobsQueue) Len() int {
@@ -43,7 +48,7 @@ func (jb *JobsQueue) Push(id int) error {
 	return nil
 }
 
-func (jb *JobsQueue) Pop() int {
+func (jb *JobsQueue) Pop() (int, bool) {
 	jb.mu.Lock()
 	defer jb.mu.Unlock()
 	for jb.size == 0 && !jb.closed {
@@ -51,12 +56,12 @@ func (jb *JobsQueue) Pop() int {
 
 	}
 	if jb.size == 0 && jb.closed {
-		return 0
+		return 0, false
 	}
 	id := jb.ids[jb.head]
 	jb.head = (jb.head + 1) % jb.capacity
 	jb.size--
-	return id
+	return id, true
 }
 
 func (jb *JobsQueue) Close() {

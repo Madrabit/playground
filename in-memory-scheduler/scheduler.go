@@ -54,7 +54,7 @@ type Results struct {
 func NewScheduler(processor Processor, cpus int) *Scheduler {
 	queue := NewJobsQueue()
 	storage := NewStorage()
-	return &Scheduler{
+	s := &Scheduler{
 		queue:         queue,
 		admin:         storage,
 		debug:         storage,
@@ -67,11 +67,12 @@ func NewScheduler(processor Processor, cpus int) *Scheduler {
 		heartBeat:     make(chan HeartBeat, 1024),
 		mu:            sync.RWMutex{},
 		cpus:          cpus,
-		cond:          sync.NewCond(&sync.Mutex{}),
 		metrics:       Metrics{},
 		validator:     NewValidator(),
 		validatorOnce: sync.Once{},
 	}
+	s.cond = sync.NewCond(&s.mu)
+	return s
 }
 
 func (s *Scheduler) Start() {
@@ -150,7 +151,10 @@ func (s *Scheduler) DispatchLoop() {
 		default:
 
 		}
-		id := s.queue.Pop()
+		id, ok := s.queue.Pop()
+		if !ok {
+			continue
+		}
 		job, err := s.reader.GetByID(id)
 		if err != nil {
 			time.Sleep(time.Millisecond * 50)
