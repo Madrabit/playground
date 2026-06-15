@@ -4,17 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"runtime"
 )
 
 func main() {
-	cpus := runtime.NumCPU()
-	Register("print", NewPrintProcessor)
-	processor, err := CreateProcessor("print")
-	if err != nil {
-		log.Printf("error creating processor %v\n", err)
-	}
-	scheduler := NewScheduler(processor, cpus)
+
 	err = scheduler.Add(Job{
 		ID:   1,
 		Name: "Test",

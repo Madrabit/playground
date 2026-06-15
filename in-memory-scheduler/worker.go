@@ -14,15 +14,16 @@ const (
 )
 
 type Worker struct {
-	ID        int
-	stop      chan struct{}
-	jobs      chan Job
-	results   chan<- Results
-	processor Processor
-	wg        sync.WaitGroup
-	heartBeat chan<- HeartBeat
-	once      sync.Once
-	state     atomic.Int32
+	ID                int
+	stop              chan struct{}
+	jobs              chan Job
+	results           chan<- Results
+	processor         Processor
+	wg                sync.WaitGroup
+	heartBeat         chan<- HeartBeat
+	once              sync.Once
+	state             atomic.Int32
+	validationRequest chan ValidationRequest
 }
 
 type Processor interface {
@@ -90,12 +91,8 @@ func (w *Worker) Process(j Job, cancel <-chan struct{}) (JobStatus, error) {
 }
 
 func (w *Worker) Enqueue(job Job) {
+	job.State = Running
 	w.jobs <- job
-}
-
-type HeartBeat struct {
-	jobId    int
-	LastSeen time.Time
 }
 
 func (w *Worker) CheckHealth() {

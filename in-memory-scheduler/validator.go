@@ -7,15 +7,14 @@ import (
 )
 
 type Validator struct {
+	request chan ValidationRequest
 	jobs    chan Job
-	errChan chan error
 	stop    chan struct{}
 }
 
-func NewValidator() *Validator {
+func NewValidator(request chan ValidationRequest) *Validator {
 	return &Validator{
-		jobs:    make(chan Job, 1024),
-		errChan: make(chan error, 1024),
+		request: request,
 		stop:    make(chan struct{}),
 	}
 }
@@ -25,23 +24,19 @@ func (v *Validator) Loop() {
 		select {
 		case <-v.stop:
 			return
-		case j := <-v.jobs:
-			err := v.validateJob(j)
-			v.errChan <- err
+		case j := <-v.request:
+			err := v.validateJob(j.job)
+			j.reply <- ValidationResult{
+				JobID: j.JobID,
+				job:   j.job,
+				Err:   err,
+			}
 		}
 	}
 }
 
 func (v *Validator) Stop() {
 	close(v.stop)
-}
-
-func (v *Validator) Validate(j Job) {
-	v.jobs <- j
-}
-
-func (v *Validator) ErrChan() <-chan error {
-	return v.errChan
 }
 
 func (v *Validator) validateJob(j Job) error {

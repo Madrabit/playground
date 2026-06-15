@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,23 +25,21 @@ type Scheduler struct {
 		блокировка для сбора в мапу с разных воркеров activeWorkers
 		а также MoveJob и CloneJob для демонстрационного кода
 	*/
-	mu            sync.RWMutex
-	workers       []*Worker
-	stop          chan struct{}
-	roundRobin    uint64
-	results       chan Results
-	processor     Processor
-	wg            sync.WaitGroup
-	goroutines    atomic.Int64
-	validator     *Validator
-	validatorOnce sync.Once
-	activeWorkers map[int]time.Time
-	heartBeat     chan HeartBeat
-	cpus          int
-	cond          *sync.Cond
-	metrics       Metrics
-	storage       *Storage // для имитации бага прямой доступ в структуру
-
+	mu                sync.RWMutex
+	workers           []*Worker
+	stop              chan struct{}
+	roundRobin        uint64
+	results           chan Results
+	wg                sync.WaitGroup
+	validator         *Validator
+	validatorOnce     sync.Once
+	activeWorkers     map[int]time.Time
+	heartBeat         chan HeartBeat
+	cond              *sync.Cond
+	metrics           Metrics
+	storage           *Storage // для имитации бага прямой доступ в структуру
+	validationRequest chan ValidationRequest
+	validationResult  chan ValidationResult
 }
 
 type Results struct {
@@ -51,33 +48,36 @@ type Results struct {
 	Error error
 }
 
-func NewScheduler(processor Processor, cpus int) *Scheduler {
-	queue := NewJobsQueue()
+func NewScheduler(
+	validator *Validator,
+	queue *JobsQueue,
+	validationRequest chan ValidationRequest,
+	result chan Results,
+	heartBeat chan HeartBeat,
+) *Scheduler {
 	storage := NewStorage()
 	s := &Scheduler{
-		queue:         queue,
-		admin:         storage,
-		debug:         storage,
-		reader:        storage,
-		writer:        storage,
-		stop:          make(chan struct{}),
-		results:       make(chan Results, 1024),
-		processor:     processor,
-		activeWorkers: map[int]time.Time{},
-		heartBeat:     make(chan HeartBeat, 1024),
-		mu:            sync.RWMutex{},
-		cpus:          cpus,
-		metrics:       Metrics{},
-		validator:     NewValidator(),
-		validatorOnce: sync.Once{},
+		queue:             queue,
+		admin:             storage,
+		debug:             storage,
+		reader:            storage,
+		writer:            storage,
+		stop:              make(chan struct{}),
+		results:           result,
+		activeWorkers:     map[int]time.Time{},
+		heartBeat:         heartBeat,
+		mu:                sync.RWMutex{},
+		metrics:           Metrics{},
+		validator:         validator,
+		validatorOnce:     sync.Once{},
+		validationRequest: validationRequest,
+		validationResult:  make(chan ValidationResult, 1024),
 	}
 	s.cond = sync.NewCond(&s.mu)
 	return s
 }
 
 func (s *Scheduler) Start() {
-	s.StartWorkers(s.cpus)
-	s.StartValidator()
 	go func() {
 		for w := range s.heartBeat {
 			s.mu.Lock()
@@ -85,15 +85,6 @@ func (s *Scheduler) Start() {
 			s.mu.Unlock()
 		}
 	}()
-}
-
-func (s *Scheduler) Stop() {
-	close(s.stop)
-	for _, w := range s.workers {
-		s.StopWorker(w)
-	}
-	s.StopValidator()
-	s.wg.Wait()
 }
 
 func (s *Scheduler) Add(j Job) error {
@@ -112,35 +103,16 @@ func (s *Scheduler) AddAndLog(j Job) error {
 	return s.Add(j)
 }
 
-func (s *Scheduler) StartWorkers(cpus int) {
-	n := cpus * 4
-	s.workers = make([]*Worker, s.cpus*4)
-	processor := Use(
-		LoggingMiddleware,
-		RetryMiddleware(3),
-	)(s.processor)
+type ValidationRequest struct {
+	JobID int
+	job   Job
+	reply chan ValidationResult
+}
 
-	for i := 0; i < n; i++ {
-		w := NewWorker(i, s.results, processor, s.heartBeat)
-		s.workers[i] = w
-	}
-	for _, w := range s.workers {
-		s.StartWorker(w)
-	}
-	s.wg.Add(1)
-	s.goroutines.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer s.goroutines.Add(-1)
-		s.DispatchLoop()
-	}()
-	s.wg.Add(1)
-	s.goroutines.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer s.goroutines.Add(-1)
-		s.handleResults()
-	}()
+type ValidationResult struct {
+	JobID int
+	job   Job
+	Err   error
 }
 
 func (s *Scheduler) DispatchLoop() {
@@ -149,7 +121,6 @@ func (s *Scheduler) DispatchLoop() {
 		case <-s.stop:
 			return
 		default:
-
 		}
 		id, ok := s.queue.Pop()
 		if !ok {
@@ -160,41 +131,21 @@ func (s *Scheduler) DispatchLoop() {
 			time.Sleep(time.Millisecond * 50)
 			continue
 		}
-		worker := s.pickWorker()
-		job.State = Running
-		worker.Enqueue(job)
-	}
-}
-
-func (s *Scheduler) StartWorker(w *Worker) {
-	s.wg.Add(1)
-	s.goroutines.Add(1)
-	go func() {
-		defer s.goroutines.Add(-1)
-		defer s.wg.Done()
-		w.Start()
-	}()
-}
-
-func (s *Scheduler) StopWorker(w *Worker) {
-	close(w.stop)
-}
-
-func (s *Scheduler) StartValidator() {
-	go func() {
-		s.validator.Loop()
-	}()
-	go func() {
-		for e := range s.validator.ErrChan() {
-			if e != nil {
-				log.Println(e)
-			}
+		replyChan := make(chan ValidationResult, 1)
+		request := ValidationRequest{
+			JobID: id,
+			job:   job,
+			reply: replyChan,
 		}
-	}()
-}
-
-func (s *Scheduler) StopValidator() {
-	s.validator.Stop()
+		s.validationRequest <- request
+		result := <-replyChan
+		if result.Err != nil {
+			// пока так
+			fmt.Printf("scheduler handle validation result job: %d %w", result.JobID)
+		}
+		worker := s.pickWorker()
+		worker.Enqueue(result.job)
+	}
 }
 
 func (s *Scheduler) handleResults() {
@@ -351,20 +302,6 @@ func (s *Scheduler) GetById(ID int) (Job, error) {
 	return job, nil
 }
 
-func (s *Scheduler) ValidateAsync() {
-	ids := s.reader.ListIDs()
-	for _, id := range ids {
-		job, err := s.reader.GetByID(id)
-		if err != nil {
-			continue
-		}
-		jobCopy := job
-		go func(j Job) {
-			s.validator.Validate(j)
-		}(jobCopy)
-	}
-}
-
 func (s *Scheduler) ActiveWorkers() []int {
 	s.mu.RLock()
 	defer s.mu.Unlock()
@@ -373,10 +310,6 @@ func (s *Scheduler) ActiveWorkers() []int {
 		active = append(active, k)
 	}
 	return active
-}
-
-func (s *Scheduler) CloseQueue() {
-	s.queue.Close()
 }
 
 type SchedulerStats struct {
