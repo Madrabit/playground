@@ -18,23 +18,23 @@ type App struct {
 	wg         sync.WaitGroup
 	stop       chan struct{}
 	queue      *JobsQueue
-	results    chan Results
 	heartBeat  chan HeartBeat
+	results    []chan Results
 }
 
 func NewApp() *App {
 	validationRequest := make(chan ValidationRequest, 1024)
-	results := make(chan Results, 1024)
+	results := make([]chan Results, 1024)
 	heartBeat := make(chan HeartBeat, 1024)
 	validator := NewValidator(validationRequest)
-	cpus := runtime.NumCPU()
+
 	Register("print", NewPrintProcessor)
 	processor, err := CreateProcessor("print")
 	if err != nil {
 		log.Printf("error creating processor %v\n", err)
 	}
 	queue := NewJobsQueue()
-
+	cpus := runtime.NumCPU()
 	scheduler := NewScheduler(validator, queue, validationRequest, results, heartBeat)
 	return &App{
 		validator: validator,
@@ -47,7 +47,9 @@ func NewApp() *App {
 }
 
 func (app *App) Start() {
+	app.scheduler.Start()
 	app.startValidator()
+	app.startWorkers(app.cpus)
 }
 
 func (app *App) startValidator() {
@@ -65,26 +67,15 @@ func (app *App) startWorkers(cpus int) {
 	)(app.processor)
 
 	for i := 0; i < n; i++ {
-		w := NewWorker(i, app.results, processor, app.heartBeat)
+		resultChan := make(chan Results)
+		w := NewWorker(i, resultChan, processor, app.heartBeat)
 		app.workers[i] = w
+		app.results = append(app.results, resultChan)
 	}
 	for _, w := range app.workers {
 		app.StartWorker(w)
 	}
-	app.wg.Add(1)
-	app.goroutines.Add(1)
-	go func() {
-		defer app.wg.Done()
-		defer app.goroutines.Add(-1)
-		app.scheduler.DispatchLoop()
-	}()
-	app.wg.Add(1)
-	app.goroutines.Add(1)
-	go func() {
-		defer app.wg.Done()
-		defer app.goroutines.Add(-1)
-		app.scheduler.handleResults()
-	}()
+
 }
 
 func (app *App) StartWorker(w *Worker) {
@@ -111,6 +102,7 @@ func (app *App) Stop() {
 		app.StopWorker(w)
 	}
 	app.StopValidator()
+	app.scheduler.Stop()
 	app.wg.Wait()
 }
 

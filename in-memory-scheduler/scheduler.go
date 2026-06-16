@@ -29,7 +29,7 @@ type Scheduler struct {
 	workers           []*Worker
 	stop              chan struct{}
 	roundRobin        uint64
-	results           chan Results
+	results           []chan Results
 	wg                sync.WaitGroup
 	validator         *Validator
 	validatorOnce     sync.Once
@@ -40,6 +40,8 @@ type Scheduler struct {
 	storage           *Storage // для имитации бага прямой доступ в структуру
 	validationRequest chan ValidationRequest
 	validationResult  chan ValidationResult
+	mergedChan        chan Results
+	goroutines        atomic.Int64
 }
 
 type Results struct {
@@ -52,7 +54,7 @@ func NewScheduler(
 	validator *Validator,
 	queue *JobsQueue,
 	validationRequest chan ValidationRequest,
-	result chan Results,
+	results []chan Results,
 	heartBeat chan HeartBeat,
 ) *Scheduler {
 	storage := NewStorage()
@@ -63,7 +65,7 @@ func NewScheduler(
 		reader:            storage,
 		writer:            storage,
 		stop:              make(chan struct{}),
-		results:           result,
+		results:           results,
 		activeWorkers:     map[int]time.Time{},
 		heartBeat:         heartBeat,
 		mu:                sync.RWMutex{},
@@ -72,12 +74,34 @@ func NewScheduler(
 		validatorOnce:     sync.Once{},
 		validationRequest: validationRequest,
 		validationResult:  make(chan ValidationResult, 1024),
+		mergedChan:        make(chan Results, 1024),
 	}
 	s.cond = sync.NewCond(&s.mu)
 	return s
 }
 
 func (s *Scheduler) Start() {
+	s.wg.Add(1)
+	s.goroutines.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.goroutines.Add(-1)
+		s.DispatchLoop()
+	}()
+	s.wg.Add(1)
+	s.goroutines.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.goroutines.Add(-1)
+		s.MergeResults()
+	}()
+	s.wg.Add(1)
+	s.goroutines.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.goroutines.Add(-1)
+		s.HandleMergedResults()
+	}()
 	go func() {
 		for w := range s.heartBeat {
 			s.mu.Lock()
@@ -85,6 +109,11 @@ func (s *Scheduler) Start() {
 			s.mu.Unlock()
 		}
 	}()
+}
+
+func (s *Scheduler) Stop() {
+	close(s.stop)
+	s.wg.Wait()
 }
 
 func (s *Scheduler) Add(j Job) error {
@@ -148,29 +177,46 @@ func (s *Scheduler) DispatchLoop() {
 	}
 }
 
-func (s *Scheduler) handleResults() {
-	for {
-		select {
-		case <-s.stop:
-			return
-		case result := <-s.results:
-			job, err := s.reader.GetByID(result.JobID)
-			if err != nil {
-				continue
+func (s *Scheduler) MergeResults() chan Results {
+	wg := sync.WaitGroup{}
+	for _, ch := range s.results {
+		wg.Add(1)
+		go func(ch chan Results) {
+			defer wg.Done()
+			for result := range ch {
+				s.mergedChan <- result
 			}
-			if result.Error != nil {
-				job.State = Failed
-				s.metrics.failed.Add(1)
-			} else {
-				job.State = result.State
-				s.metrics.done.Add(1)
-			}
-			err = s.writer.Update(job)
-			if err != nil {
-				fmt.Println("failed to update")
-				continue
-			}
+		}(ch)
+	}
+	wg.Wait()
+	close(s.mergedChan)
+	return s.mergedChan
+}
+
+func (s *Scheduler) HandleMergedResults() {
+	go func() {
+		for result := range s.mergedChan {
+			s.handleResults(result)
 		}
+	}()
+}
+
+func (s *Scheduler) handleResults(result Results) {
+	job, err := s.reader.GetByID(result.JobID)
+	if err != nil {
+		return
+	}
+	if result.Error != nil {
+		job.State = Failed
+		s.metrics.failed.Add(1)
+	} else {
+		job.State = result.State
+		s.metrics.done.Add(1)
+	}
+	err = s.writer.Update(job)
+	if err != nil {
+		fmt.Println("failed to update")
+		return
 	}
 }
 

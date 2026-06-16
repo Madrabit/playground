@@ -30,7 +30,7 @@ type Processor interface {
 	Process(job Job, cancel <-chan struct{}) (JobStatus, error)
 }
 
-func NewWorker(ID int, results chan<- Results, processor Processor, heartBeat chan<- HeartBeat) *Worker {
+func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan<- HeartBeat) *Worker {
 	return &Worker{
 		ID:        ID,
 		stop:      make(chan struct{}),
