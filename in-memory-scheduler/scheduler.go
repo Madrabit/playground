@@ -177,7 +177,7 @@ func (s *Scheduler) DispatchLoop() {
 	}
 }
 
-func (s *Scheduler) MergeResults() chan Results {
+func (s *Scheduler) MergeResults() {
 	wg := sync.WaitGroup{}
 	for _, ch := range s.results {
 		wg.Add(1)
@@ -190,15 +190,12 @@ func (s *Scheduler) MergeResults() chan Results {
 	}
 	wg.Wait()
 	close(s.mergedChan)
-	return s.mergedChan
 }
 
 func (s *Scheduler) HandleMergedResults() {
-	go func() {
-		for result := range s.mergedChan {
-			s.handleResults(result)
-		}
-	}()
+	for result := range s.mergedChan {
+		s.handleResults(result)
+	}
 }
 
 func (s *Scheduler) handleResults(result Results) {

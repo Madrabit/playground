@@ -43,6 +43,7 @@ func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan
 
 func (w *Worker) Loop() {
 	defer func() {
+		close(w.results)
 		w.state.Store(StoppedWorker)
 	}()
 	for {

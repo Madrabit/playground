@@ -24,10 +24,9 @@ type App struct {
 
 func NewApp() *App {
 	validationRequest := make(chan ValidationRequest, 1024)
-	results := make([]chan Results, 1024)
+	results := make([]chan Results, 0, 1024)
 	heartBeat := make(chan HeartBeat, 1024)
 	validator := NewValidator(validationRequest)
-
 	Register("print", NewPrintProcessor)
 	processor, err := CreateProcessor("print")
 	if err != nil {
@@ -65,7 +64,6 @@ func (app *App) startWorkers(cpus int) {
 		LoggingMiddleware,
 		RetryMiddleware(3),
 	)(app.processor)
-
 	for i := 0; i < n; i++ {
 		resultChan := make(chan Results)
 		w := NewWorker(i, resultChan, processor, app.heartBeat)
