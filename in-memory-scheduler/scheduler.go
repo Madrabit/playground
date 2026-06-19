@@ -16,11 +16,13 @@ type Metrics struct {
 }
 
 type Scheduler struct {
-	queue  *JobsQueue
-	admin  StoreAdmin
-	debug  StoreDebug
-	reader StoreReader
-	writer StoreWriter
+	normalQueue  *JobsQueue
+	highQueue    *JobsQueue
+	queueCounter int
+	admin        StoreAdmin
+	debug        StoreDebug
+	reader       StoreReader
+	writer       StoreWriter
 	/*
 		блокировка для сбора в мапу с разных воркеров activeWorkers
 		а также MoveJob и CloneJob для демонстрационного кода
@@ -52,14 +54,16 @@ type Results struct {
 
 func NewScheduler(
 	validator *Validator,
-	queue *JobsQueue,
+	normalQueue *JobsQueue,
+	highQueue *JobsQueue,
 	validationRequest chan ValidationRequest,
 	results []chan Results,
 	heartBeat chan HeartBeat,
 ) *Scheduler {
 	storage := NewStorage()
 	s := &Scheduler{
-		queue:             queue,
+		normalQueue:       normalQueue,
+		highQueue:         highQueue,
 		admin:             storage,
 		debug:             storage,
 		reader:            storage,
@@ -81,38 +85,55 @@ func NewScheduler(
 }
 
 func (s *Scheduler) Start() {
-	s.wg.Add(1)
-	s.goroutines.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer s.goroutines.Add(-1)
-		s.DispatchLoop()
-	}()
-	s.wg.Add(1)
-	s.goroutines.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer s.goroutines.Add(-1)
-		s.MergeResults()
-	}()
-	s.wg.Add(1)
-	s.goroutines.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer s.goroutines.Add(-1)
-		s.HandleMergedResults()
-	}()
-	go func() {
+	s.goSafe(s.DispatchLoop)
+	s.goSafe(s.MergeResults)
+	s.goSafe(s.HandleMergedResults)
+	s.goSafe(func() {
 		for w := range s.heartBeat {
 			s.mu.Lock()
 			s.activeWorkers[w.jobId] = w.LastSeen
 			s.mu.Unlock()
 		}
+	})
+	s.goSafe(func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.stop:
+				return
+			case <-ticker.C:
+				s.mu.Lock()
+				for jobId, lastSeen := range s.activeWorkers {
+					if time.Since(lastSeen) > 10*time.Second {
+						fmt.Printf("worker considered dead %d", jobId)
+						delete(s.activeWorkers, jobId)
+					}
+				}
+				s.mu.Unlock()
+			}
+		}
+	})
+}
+
+func (s *Scheduler) goSafe(fun func()) {
+	s.wg.Add(1)
+	s.goroutines.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.goroutines.Add(-1)
+		fun()
 	}()
 }
 
 func (s *Scheduler) Stop() {
 	close(s.stop)
+	s.highQueue.Close()
+	s.normalQueue.Close()
+	close(s.heartBeat)
+	for _, ch := range s.results {
+		close(ch)
+	}
 	s.wg.Wait()
 }
 
@@ -121,7 +142,11 @@ func (s *Scheduler) Add(j Job) error {
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
 	}
-	err = s.queue.Push(j.ID)
+	if s.queueCounter < 5 {
+		err = s.highQueue.Push(j.ID)
+	} else {
+		err = s.normalQueue.Push(j.ID)
+	}
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
 	}
@@ -151,9 +176,15 @@ func (s *Scheduler) DispatchLoop() {
 			return
 		default:
 		}
-		id, ok := s.queue.Pop()
+		var id int
+		var ok bool
+		if s.queueCounter < 5 {
+			id, ok = s.highQueue.Pop()
+		} else {
+			id, ok = s.normalQueue.Pop()
+		}
 		if !ok {
-			continue
+			return
 		}
 		job, err := s.reader.GetByID(id)
 		if err != nil {
@@ -170,7 +201,7 @@ func (s *Scheduler) DispatchLoop() {
 		result := <-replyChan
 		if result.Err != nil {
 			// пока так
-			fmt.Printf("scheduler handle validation result job: %d %w", result.JobID)
+			fmt.Errorf("scheduler handle validation result job: %d %w", result.JobID, result.Err)
 		}
 		worker := s.pickWorker()
 		worker.Enqueue(result.job)

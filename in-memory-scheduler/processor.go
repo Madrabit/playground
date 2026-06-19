@@ -13,10 +13,12 @@ func NewPrintProcessor() Processor {
 
 func (print *PrintProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
 	//fmt.Printf("pid:%d", job.ID)
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
 	select {
 	case <-cancel:
 		return Cancelled, nil
-	case <-time.After(time.Second):
+	case <-timer.C:
 		x := job.ID + 1
 		if x%10 == 0 {
 			return Done, nil
@@ -34,10 +36,12 @@ func NewSleepProcessor() Processor {
 }
 
 func (p *SleepProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+	timer := time.NewTimer(1 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-cancel:
 		return Cancelled, nil
-	case <-time.After(time.Second):
+	case <-timer.C:
 		time.Sleep(1 * time.Second)
 		return Pending, nil
 	}
@@ -48,19 +52,39 @@ type FailProcessor struct{}
 func NewFailProcessor() Processor { return &FailProcessor{} }
 
 func (p *FailProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+	timer := time.NewTimer(1 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-cancel:
 		return Cancelled, nil
-	case <-time.After(time.Second):
+	case <-timer.C:
 		fmt.Printf("Proccess ID: %d", job.ID)
 		return Failed, fmt.Errorf("job: %d failed %w", job.ID, ErrFailedProcess)
 	}
 }
 
-type ProcessFunc func(job Job) (JobStatus, error)
+type LongProcessor struct{}
 
-func (f ProcessFunc) Process(job Job) (JobStatus, error) {
-	return f(job)
+func NewLongProcessor() Processor {
+	return &LongProcessor{}
+}
+
+func (p *LongProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-cancel:
+		return Cancelled, nil
+	case <-timer.C:
+		fmt.Printf("Long Proccess ID: %d", job.ID)
+		return Pending, nil
+	}
+}
+
+type ProcessFunc func(job Job, cancel <-chan struct{}) (JobStatus, error)
+
+func (f ProcessFunc) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+	return f(job, cancel)
 }
 
 var registry = make(map[string]ProcessFactory)

@@ -42,8 +42,15 @@ func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan
 }
 
 func (w *Worker) Loop() {
+	timer := time.NewTimer(0)
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
 	defer func() {
-		close(w.results)
+		timer.Stop()
 		w.state.Store(StoppedWorker)
 	}()
 	for {
@@ -52,6 +59,13 @@ func (w *Worker) Loop() {
 		case <-w.stop:
 			return
 		case job := <-w.jobs:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(1 * time.Second)
 			resChan := make(chan Results, 1)
 			cancel := make(chan struct{})
 			w.state.Store(Busy)
@@ -70,10 +84,21 @@ func (w *Worker) Loop() {
 			select {
 			case <-w.stop:
 				close(cancel)
+				w.results <- Results{
+					job.ID,
+					Cancelled,
+					fmt.Errorf("worker stopped"),
+				}
 				return
 			case res := <-resChan:
 				w.results <- res
-			case <-time.After(1 * time.Second):
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			case <-timer.C:
 				w.results <- Results{
 					job.ID,
 					Failed,
@@ -82,7 +107,6 @@ func (w *Worker) Loop() {
 			}
 		}
 	}
-
 }
 
 //go:noinline
@@ -97,11 +121,13 @@ func (w *Worker) Enqueue(job Job) {
 }
 
 func (w *Worker) CheckHealth() {
+	timer := time.NewTimer(1 * time.Second)
+	defer timer.Stop()
 	for {
 		select {
 		case <-w.stop:
 			return
-		case <-time.After(1 * time.Second):
+		case <-timer.C:
 			w.heartBeat <- HeartBeat{w.ID, time.Now()}
 		}
 	}

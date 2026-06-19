@@ -32,9 +32,10 @@ func NewApp() *App {
 	if err != nil {
 		log.Printf("error creating processor %v\n", err)
 	}
-	queue := NewJobsQueue()
+	normalQueue := NewJobsQueue()
+	highQueue := NewJobsQueue()
 	cpus := runtime.NumCPU()
-	scheduler := NewScheduler(validator, queue, validationRequest, results, heartBeat)
+	scheduler := NewScheduler(validator, normalQueue, highQueue, validationRequest, results, heartBeat)
 	return &App{
 		validator: validator,
 		scheduler: scheduler,
@@ -42,6 +43,7 @@ func NewApp() *App {
 		wg:        sync.WaitGroup{},
 		results:   results,
 		processor: processor,
+		stop:      make(chan struct{}),
 	}
 }
 
@@ -69,6 +71,7 @@ func (app *App) startWorkers(cpus int) {
 		w := NewWorker(i, resultChan, processor, app.heartBeat)
 		app.workers[i] = w
 		app.results = append(app.results, resultChan)
+		app.scheduler.results = append(app.scheduler.results, resultChan)
 	}
 	for _, w := range app.workers {
 		app.StartWorker(w)
@@ -95,7 +98,7 @@ func (app *App) StopValidator() {
 }
 
 func (app *App) Stop() {
-	close(app.stop)
+	//close(app.stop)
 	for _, w := range app.workers {
 		app.StopWorker(w)
 	}
