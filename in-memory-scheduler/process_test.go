@@ -55,7 +55,7 @@ func TestLongProcess(t *testing.T) {
 	app.scheduler.Add(job)
 
 	// Ждём 100ms и вызываем Stop()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 	app.Stop()
 
 	// Читаем job из storage после Stop()

@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"runtime"
 	"sync"
 )
 
@@ -45,12 +47,15 @@ func (jb *JobsQueue) Push(id int) error {
 	jb.tail = (jb.tail + 1) % jb.capacity
 	jb.size++
 	jb.cond.Signal()
+	fmt.Println("Push called id=", id, "size now=", jb.size)
+
 	return nil
 }
 
 func (jb *JobsQueue) Pop() (int, bool) {
 	jb.mu.Lock()
 	defer jb.mu.Unlock()
+	fmt.Println("Pop called, size=", jb.size, "closed=", jb.closed)
 	for jb.size == 0 && !jb.closed {
 		jb.cond.Wait()
 
@@ -65,8 +70,13 @@ func (jb *JobsQueue) Pop() (int, bool) {
 }
 
 func (jb *JobsQueue) Close() {
+	fmt.Println("Close called")
 	jb.mu.Lock()
 	defer jb.mu.Unlock()
 	jb.closed = true
 	jb.cond.Broadcast()
+	// debug
+	buf := make([]byte, 1<<10)
+	n := runtime.Stack(buf, false)
+	fmt.Println("JobsQueue.Close called, stack:\n", string(buf[:n]))
 }

@@ -89,6 +89,7 @@ func (w *Worker) Loop() {
 					Cancelled,
 					fmt.Errorf("worker stopped"),
 				}
+				fmt.Println("cancel in worker")
 				return
 			case res := <-resChan:
 				w.results <- res

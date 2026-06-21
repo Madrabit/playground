@@ -100,9 +100,9 @@ func (app *App) Stop() {
 	for _, w := range app.workers {
 		app.StopWorker(w)
 	}
+	app.wg.Wait()
 	app.StopValidator()
 	app.scheduler.Stop()
-	app.wg.Wait()
 }
 
 func (app *App) CloseQueue() {

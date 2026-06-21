@@ -70,10 +70,12 @@ func NewLongProcessor() Processor {
 }
 
 func (p *LongProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+	fmt.Println("long process started")
 	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
 	select {
 	case <-cancel:
+		fmt.Println("cancelled long process")
 		return Cancelled, nil
 	case <-timer.C:
 		fmt.Printf("Long Proccess ID: %d", job.ID)

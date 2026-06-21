@@ -87,10 +87,15 @@ func (s *Scheduler) Start() {
 	s.goSafe(s.MergeResults)
 	s.goSafe(s.HandleMergedResults)
 	s.goSafe(func() {
-		for w := range s.heartBeat {
-			s.mu.Lock()
-			s.activeWorkers[w.jobId] = w.LastSeen
-			s.mu.Unlock()
+		for {
+			select {
+			case <-s.stop:
+				return
+			case w := <-s.heartBeat:
+				s.mu.Lock()
+				s.activeWorkers[w.jobId] = w.LastSeen
+				s.mu.Unlock()
+			}
 		}
 	})
 	s.goSafe(func() {
@@ -125,9 +130,22 @@ func (s *Scheduler) goSafe(fun func()) {
 }
 
 func (s *Scheduler) Stop() {
+	// 1) Сигналим о стопе для внутренних циклов
 	close(s.stop)
+
+	// 2) Закрываем heartBeat, чтобы heartbeat‑горутину разбудить/завершить
+	close(s.heartBeat)
+
+	// 3) Закрываем очереди, чтобы разблокировать DispatchLoop (Pop() проснётся)
 	s.highQueue.Close()
 	s.normalQueue.Close()
+
+	// 4) Закрываем result‑каналы — это безопасно, потому что App уже дождался завершения воркеров
+	for _, ch := range s.results {
+		close(ch)
+	}
+
+	// 5) Ждём завершения всех goroutine, запущенных через goSafe
 	s.wg.Wait()
 }
 
@@ -167,10 +185,14 @@ type ValidationResult struct {
 
 func (s *Scheduler) DispatchLoop() {
 	for {
+		fmt.Println("stop dispatcher before")
 		select {
 		case <-s.stop:
+			fmt.Println("stop dispatcher")
 			return
+		default:
 		}
+		fmt.Println("stop dispatcher after")
 		var id int
 		var ok bool
 		if s.queueCounter < 5 {
@@ -214,8 +236,16 @@ func (s *Scheduler) MergeResults() {
 }
 
 func (s *Scheduler) HandleMergedResults() {
-	for result := range s.mergedChan {
-		s.handleResults(result)
+	for {
+		select {
+		case <-s.stop:
+			return
+		case result, ok := <-s.mergedChan:
+			if !ok {
+				return
+			}
+			s.handleResults(result)
+		}
 	}
 }
 
