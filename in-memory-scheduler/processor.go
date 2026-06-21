@@ -35,7 +35,7 @@ func NewSleepProcessor() Processor {
 	return &SleepProcessor{}
 }
 
-func (p *SleepProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+func (p *SleepProcessor) Process(_ Job, cancel <-chan struct{}) (JobStatus, error) {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 	select {

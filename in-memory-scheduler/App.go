@@ -16,7 +16,6 @@ type App struct {
 	goroutines atomic.Int64
 	cpus       int
 	wg         sync.WaitGroup
-	stop       chan struct{}
 	queue      *JobsQueue
 	heartBeat  chan HeartBeat
 	results    []chan Results
@@ -43,7 +42,7 @@ func NewApp() *App {
 		wg:        sync.WaitGroup{},
 		results:   results,
 		processor: processor,
-		stop:      make(chan struct{}),
+		heartBeat: heartBeat,
 	}
 }
 
@@ -98,7 +97,6 @@ func (app *App) StopValidator() {
 }
 
 func (app *App) Stop() {
-	//close(app.stop)
 	for _, w := range app.workers {
 		app.StopWorker(w)
 	}

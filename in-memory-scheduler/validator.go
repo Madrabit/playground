@@ -8,7 +8,6 @@ import (
 
 type Validator struct {
 	request chan ValidationRequest
-	jobs    chan Job
 	stop    chan struct{}
 }
 

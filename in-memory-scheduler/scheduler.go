@@ -41,7 +41,6 @@ type Scheduler struct {
 	metrics           Metrics
 	storage           *Storage // для имитации бага прямой доступ в структуру
 	validationRequest chan ValidationRequest
-	validationResult  chan ValidationResult
 	mergedChan        chan Results
 	goroutines        atomic.Int64
 }
@@ -77,7 +76,6 @@ func NewScheduler(
 		validator:         validator,
 		validatorOnce:     sync.Once{},
 		validationRequest: validationRequest,
-		validationResult:  make(chan ValidationResult, 1024),
 		mergedChan:        make(chan Results, 1024),
 	}
 	s.cond = sync.NewCond(&s.mu)
@@ -130,10 +128,6 @@ func (s *Scheduler) Stop() {
 	close(s.stop)
 	s.highQueue.Close()
 	s.normalQueue.Close()
-	close(s.heartBeat)
-	for _, ch := range s.results {
-		close(ch)
-	}
 	s.wg.Wait()
 }
 
@@ -144,8 +138,10 @@ func (s *Scheduler) Add(j Job) error {
 	}
 	if s.queueCounter < 5 {
 		err = s.highQueue.Push(j.ID)
+		s.queueCounter++
 	} else {
 		err = s.normalQueue.Push(j.ID)
+		s.queueCounter++
 	}
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
@@ -174,7 +170,6 @@ func (s *Scheduler) DispatchLoop() {
 		select {
 		case <-s.stop:
 			return
-		default:
 		}
 		var id int
 		var ok bool
@@ -209,18 +204,13 @@ func (s *Scheduler) DispatchLoop() {
 }
 
 func (s *Scheduler) MergeResults() {
-	wg := sync.WaitGroup{}
 	for _, ch := range s.results {
-		wg.Add(1)
 		go func(ch chan Results) {
-			defer wg.Done()
 			for result := range ch {
 				s.mergedChan <- result
 			}
 		}(ch)
 	}
-	wg.Wait()
-	close(s.mergedChan)
 }
 
 func (s *Scheduler) HandleMergedResults() {
