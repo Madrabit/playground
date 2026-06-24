@@ -11,7 +11,7 @@ import (
 type App struct {
 	validator  *Validator
 	scheduler  *Scheduler
-	workers    []*Worker
+	workers    []WorkerI
 	processor  Processor
 	goroutines atomic.Int64
 	cpus       int
@@ -46,10 +46,30 @@ func NewApp() *App {
 	}
 }
 
+type Queue interface {
+	Len() int
+	Push(id int) error
+	Pop() (int, bool)
+	Close()
+}
+
+type WorkerI interface {
+	Loop()
+	Process(j Job, cancel <-chan struct{}) (JobStatus, error)
+	Enqueue(job Job)
+	CheckHealth()
+	Start()
+	IsBusy() bool
+	IsIdle() bool
+	IsStopped() bool
+	Stop()
+}
+
 func (app *App) Start() {
+	app.startWorkers(app.cpus)
+	app.scheduler.workers = app.workers
 	app.scheduler.Start()
 	app.startValidator()
-	app.startWorkers(app.cpus)
 }
 
 func (app *App) startValidator() {
@@ -60,7 +80,7 @@ func (app *App) startValidator() {
 
 func (app *App) startWorkers(cpus int) {
 	n := cpus * 4
-	app.workers = make([]*Worker, app.cpus*4)
+	app.workers = make([]WorkerI, app.cpus*4)
 	processor := Use(
 		LoggingMiddleware,
 		RetryMiddleware(3),
@@ -78,7 +98,7 @@ func (app *App) startWorkers(cpus int) {
 
 }
 
-func (app *App) StartWorker(w *Worker) {
+func (app *App) StartWorker(w WorkerI) {
 	app.wg.Add(1)
 	app.goroutines.Add(1)
 	go func() {
@@ -88,8 +108,8 @@ func (app *App) StartWorker(w *Worker) {
 	}()
 }
 
-func (app *App) StopWorker(w *Worker) {
-	close(w.stop)
+func (app *App) StopWorker(w WorkerI) {
+	w.Stop()
 }
 
 func (app *App) StopValidator() {

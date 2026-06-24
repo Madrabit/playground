@@ -58,6 +58,7 @@ func (w *Worker) Loop() {
 		case <-w.stop:
 			return
 		case job := <-w.jobs:
+			fmt.Println("Worker got job", job.ID)
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
@@ -84,11 +85,6 @@ func (w *Worker) Loop() {
 			select {
 			case <-w.stop:
 				close(cancel)
-				w.results <- Results{
-					job.ID,
-					Cancelled,
-					fmt.Errorf("worker stopped"),
-				}
 				fmt.Println("cancel in worker")
 				return
 			case res := <-resChan:
@@ -117,6 +113,7 @@ func (w *Worker) Process(j Job, cancel <-chan struct{}) (JobStatus, error) {
 }
 
 func (w *Worker) Enqueue(job Job) {
+	fmt.Println("Enqueue", job.ID)
 	job.State = Running
 	select {
 	case <-w.stop:
@@ -124,6 +121,10 @@ func (w *Worker) Enqueue(job Job) {
 	case w.jobs <- job:
 		return
 	}
+}
+
+func (w *Worker) Stop() {
+	close(w.stop)
 }
 
 func (w *Worker) CheckHealth() {

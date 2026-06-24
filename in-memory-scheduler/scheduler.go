@@ -16,8 +16,8 @@ type Metrics struct {
 }
 
 type Scheduler struct {
-	normalQueue  *JobsQueue
-	highQueue    *JobsQueue
+	normalQueue  Queue
+	highQueue    Queue
 	queueCounter int
 	admin        StoreAdmin
 	debug        StoreDebug
@@ -28,7 +28,7 @@ type Scheduler struct {
 		а также MoveJob и CloneJob для демонстрационного кода
 	*/
 	mu                sync.RWMutex
-	workers           []*Worker
+	workers           []WorkerI
 	stop              chan struct{}
 	roundRobin        uint64
 	results           []chan Results
@@ -134,7 +134,7 @@ func (s *Scheduler) Stop() {
 	close(s.stop)
 
 	// 2) Закрываем heartBeat, чтобы heartbeat‑горутину разбудить/завершить
-	close(s.heartBeat)
+	//close(s.heartBeat)
 
 	// 3) Закрываем очереди, чтобы разблокировать DispatchLoop (Pop() проснётся)
 	s.highQueue.Close()
@@ -150,6 +150,7 @@ func (s *Scheduler) Stop() {
 }
 
 func (s *Scheduler) Add(j Job) error {
+	fmt.Println("Add start", j.ID)
 	err := s.writer.Save(j)
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
@@ -164,6 +165,7 @@ func (s *Scheduler) Add(j Job) error {
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
 	}
+	fmt.Println("Add finished", j.ID)
 	return nil
 }
 
@@ -268,7 +270,7 @@ func (s *Scheduler) handleResults(result Results) {
 	}
 }
 
-func (s *Scheduler) pickWorker() *Worker {
+func (s *Scheduler) pickWorker() WorkerI {
 	i := atomic.AddUint64(&s.roundRobin, 1)
 	return s.workers[i%uint64(len(s.workers))]
 }
