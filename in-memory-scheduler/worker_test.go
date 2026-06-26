@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -32,7 +33,9 @@ func TestWorkerProcessesJob(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error creating processor: %v", err)
 	}
-	worker := NewWorker(1, results, processor, heartBeat)
+
+	var wg sync.WaitGroup
+	worker := NewWorker(1, results, processor, heartBeat, &wg)
 	worker.Start()
 	job := Job{
 		ID:   1,
@@ -59,7 +62,8 @@ func TestWorkerCancelsJob(t *testing.T) {
 	Register("long", NewLongProcessor)
 	processor, _ := CreateProcessor("long")
 
-	worker := NewWorker(1, results, processor, heartBeat)
+	var wg sync.WaitGroup
+	worker := NewWorker(1, results, processor, heartBeat, &wg)
 	worker.Start()
 
 	job := Job{ID: 1}

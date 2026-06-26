@@ -150,22 +150,25 @@ func (s *Scheduler) Stop() {
 }
 
 func (s *Scheduler) Add(j Job) error {
-	fmt.Println("Add start", j.ID)
-	err := s.writer.Save(j)
-	if err != nil {
-		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
-	}
+	const maxPendingJobs = 100
+	var q Queue
 	if s.queueCounter < 5 {
-		err = s.highQueue.Push(j.ID)
-		s.queueCounter++
+		q = s.highQueue
 	} else {
-		err = s.normalQueue.Push(j.ID)
-		s.queueCounter++
+		q = s.normalQueue
 	}
+	if q.Len() >= maxPendingJobs {
+		return ErrQueueFull
+	}
+	err := s.normalQueue.Push(j.ID)
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
 	}
-	fmt.Println("Add finished", j.ID)
+	err = s.writer.Save(j)
+	if err != nil {
+		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
+	}
+	s.queueCounter++
 	return nil
 }
 
@@ -223,6 +226,7 @@ func (s *Scheduler) DispatchLoop() {
 			fmt.Errorf("scheduler handle validation result job: %d %w", result.JobID, result.Err)
 		}
 		worker := s.pickWorker()
+		s.wg.Add(1)
 		worker.Enqueue(result.job)
 	}
 }

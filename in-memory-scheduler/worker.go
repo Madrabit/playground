@@ -19,17 +19,17 @@ type Worker struct {
 	jobs      chan Job
 	results   chan<- Results
 	processor Processor
-	wg        sync.WaitGroup
 	heartBeat chan<- HeartBeat
 	once      sync.Once
 	state     atomic.Int32
+	wg        *sync.WaitGroup
 }
 
 type Processor interface {
 	Process(job Job, cancel <-chan struct{}) (JobStatus, error)
 }
 
-func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan<- HeartBeat) *Worker {
+func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan<- HeartBeat, wg *sync.WaitGroup) *Worker {
 	return &Worker{
 		ID:        ID,
 		stop:      make(chan struct{}),
@@ -37,6 +37,7 @@ func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan
 		results:   results,
 		processor: processor,
 		heartBeat: heartBeat,
+		wg:        wg,
 	}
 }
 
@@ -57,7 +58,10 @@ func (w *Worker) Loop() {
 		select {
 		case <-w.stop:
 			return
-		case job := <-w.jobs:
+		case job, ok := <-w.jobs:
+			if !ok {
+				return
+			}
 			fmt.Println("Worker got job", job.ID)
 			if !timer.Stop() {
 				select {
@@ -84,10 +88,12 @@ func (w *Worker) Loop() {
 			}()
 			select {
 			case <-w.stop:
-				close(cancel)
+				defer close(cancel)
+				w.wg.Done()
 				fmt.Println("cancel in worker")
 				return
 			case res := <-resChan:
+				w.wg.Done()
 				w.results <- res
 				if !timer.Stop() {
 					select {
@@ -96,10 +102,17 @@ func (w *Worker) Loop() {
 					}
 				}
 			case <-timer.C:
-				w.results <- Results{
-					job.ID,
-					Failed,
-					fmt.Errorf("timeout exceeded waiting for job %d", job.ID),
+				select {
+				case <-w.stop:
+					w.wg.Done()
+					return
+				default:
+					w.results <- Results{
+						job.ID,
+						Failed,
+						fmt.Errorf("timeout exceeded waiting for job %d", job.ID),
+					}
+					w.wg.Done()
 				}
 			}
 		}

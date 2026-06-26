@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -28,8 +29,9 @@ func TestIntegration_SchedulerEndToEnd(t *testing.T) {
 	Register("fake", func() Processor { return &FakeProcessor{} })
 	processor, _ := CreateProcessor("fake")
 
+	var wg sync.WaitGroup
 	// --- Worker ---
-	worker := NewWorker(1, results[0], processor, heartBeat)
+	worker := NewWorker(1, results[0], processor, heartBeat, &wg)
 	worker.Start()
 
 	// --- Scheduler ---
