@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"runtime/trace"
 	"testing"
 	"time"
 )
@@ -32,6 +34,9 @@ func TestIntegration_Shutdown(t *testing.T) {
 }
 
 func TestFatJobs(t *testing.T) {
+	f, _ := os.Create("trace.out")
+	trace.Start(f)
+	defer trace.Stop()
 	app := NewApp()
 	app.Start()
 

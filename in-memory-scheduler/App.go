@@ -89,7 +89,7 @@ func (app *App) startWorkers(cpus int) {
 	)(app.processor)
 	for i := 0; i < n; i++ {
 		resultChan := make(chan Results)
-		w := NewWorker(i, resultChan, processor, app.heartBeat, &app.scheduler.wg)
+		w := NewWorker(i, resultChan, processor, app.heartBeat, &app.scheduler.jobsWg)
 		app.workers[i] = w
 		app.results = append(app.results, resultChan)
 		app.scheduler.results = append(app.scheduler.results, resultChan)
@@ -118,9 +118,16 @@ func (app *App) StopValidator() {
 }
 
 func (app *App) Stop() {
+	app.scheduler.StopDispatch()
+	app.scheduler.jobsWg.Wait()
 	for _, w := range app.workers {
 		app.StopWorker(w)
 	}
+	for _, ch := range app.scheduler.results {
+		close(ch)
+	}
+	app.scheduler.mergeWg.Wait()
+	close(app.scheduler.mergedChan)
 	// защитный дамп перед ожиданием — если Stop зависнет, дамп уже будет в логах
 	go func() {
 		// через 5s после вызова Stop сделаем дамп, если Wait всё ещё висит
@@ -128,11 +135,10 @@ func (app *App) Stop() {
 		fmt.Println("Stop() seems stuck — dumping goroutines")
 		dumpStacks()
 	}()
-	app.scheduler.wg.Wait()
+	//app.scheduler.wg.Wait()
 	app.StopValidator()
 	app.scheduler.Stop()
 	app.wg.Wait()
-
 }
 
 func (app *App) CloseQueue() {

@@ -42,7 +42,6 @@ func (p *SleepProcessor) Process(_ Job, cancel <-chan struct{}) (JobStatus, erro
 	case <-cancel:
 		return Cancelled, nil
 	case <-timer.C:
-		time.Sleep(1 * time.Second)
 		return Pending, nil
 	}
 }
@@ -131,7 +130,5 @@ func (h *HangingProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, 
 		return Cancelled, nil
 	case <-h.stop:
 		return Done, nil
-	default:
-		return Pending, nil
 	}
 }

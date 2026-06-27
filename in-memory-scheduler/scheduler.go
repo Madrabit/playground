@@ -43,6 +43,8 @@ type Scheduler struct {
 	validationRequest chan ValidationRequest
 	mergedChan        chan Results
 	goroutines        atomic.Int64
+	mergeWg           sync.WaitGroup
+	jobsWg            sync.WaitGroup
 }
 
 type Results struct {
@@ -83,10 +85,10 @@ func NewScheduler(
 }
 
 func (s *Scheduler) Start() {
-	s.goSafe(s.DispatchLoop)
-	s.goSafe(s.MergeResults)
-	s.goSafe(s.HandleMergedResults)
-	s.goSafe(func() {
+	s.goSafe("DispatchLoop", s.DispatchLoop)
+	s.goSafe("MergeResults", s.MergeResults)
+	s.goSafe("HandleMergedResults", s.HandleMergedResults)
+	s.goSafe("HeartBeatLoop", func() {
 		for {
 			select {
 			case <-s.stop:
@@ -98,7 +100,7 @@ func (s *Scheduler) Start() {
 			}
 		}
 	})
-	s.goSafe(func() {
+	s.goSafe("HealthChecker", func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -119,10 +121,11 @@ func (s *Scheduler) Start() {
 	})
 }
 
-func (s *Scheduler) goSafe(fun func()) {
+func (s *Scheduler) goSafe(name string, fun func()) {
 	s.wg.Add(1)
 	s.goroutines.Add(1)
 	go func() {
+		defer fmt.Println("EXIT:", name)
 		defer s.wg.Done()
 		defer s.goroutines.Add(-1)
 		fun()
@@ -130,22 +133,10 @@ func (s *Scheduler) goSafe(fun func()) {
 }
 
 func (s *Scheduler) Stop() {
-	// 1) Сигналим о стопе для внутренних циклов
-	close(s.stop)
-
-	// 2) Закрываем heartBeat, чтобы heartbeat‑горутину разбудить/завершить
-	//close(s.heartBeat)
-
-	// 3) Закрываем очереди, чтобы разблокировать DispatchLoop (Pop() проснётся)
+	// 1. Больше не принимаем новые задачи
 	s.highQueue.Close()
 	s.normalQueue.Close()
-
-	// 4) Закрываем result‑каналы — это безопасно, потому что App уже дождался завершения воркеров
-	for _, ch := range s.results {
-		close(ch)
-	}
-
-	// 5) Ждём завершения всех goroutine, запущенных через goSafe
+	close(s.stop)
 	s.wg.Wait()
 }
 
@@ -160,7 +151,7 @@ func (s *Scheduler) Add(j Job) error {
 	if q.Len() >= maxPendingJobs {
 		return ErrQueueFull
 	}
-	err := s.normalQueue.Push(j.ID)
+	err := q.Push(j.ID)
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
 	}
@@ -205,6 +196,7 @@ func (s *Scheduler) DispatchLoop() {
 		} else {
 			id, ok = s.normalQueue.Pop()
 		}
+		s.queueCounter--
 		if !ok {
 			return
 		}
@@ -226,14 +218,17 @@ func (s *Scheduler) DispatchLoop() {
 			fmt.Errorf("scheduler handle validation result job: %d %w", result.JobID, result.Err)
 		}
 		worker := s.pickWorker()
-		s.wg.Add(1)
+		s.jobsWg.Add(1)
 		worker.Enqueue(result.job)
 	}
 }
 
 func (s *Scheduler) MergeResults() {
+
 	for _, ch := range s.results {
+		s.mergeWg.Add(1)
 		go func(ch chan Results) {
+			defer s.mergeWg.Done()
 			for result := range ch {
 				s.mergedChan <- result
 			}
@@ -253,6 +248,17 @@ func (s *Scheduler) HandleMergedResults() {
 			s.handleResults(result)
 		}
 	}
+}
+
+func (s *Scheduler) StopDispatch() {
+	// Закрываем очереди — Pop() вернёт ok=false
+	s.highQueue.Close()
+	s.normalQueue.Close()
+
+	// Пробуждаем всех, кто ждёт cond
+	s.cond.L.Lock()
+	s.cond.Broadcast()
+	s.cond.L.Unlock()
 }
 
 func (s *Scheduler) handleResults(result Results) {

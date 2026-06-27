@@ -51,12 +51,11 @@ func (jb *JobsQueue) Push(id int) error {
 func (jb *JobsQueue) Pop() (int, bool) {
 	jb.mu.Lock()
 	defer jb.mu.Unlock()
-	for jb.size == 0 && !jb.closed {
+	for jb.size == 0 {
+		if jb.closed {
+			return 0, false
+		}
 		jb.cond.Wait()
-
-	}
-	if jb.size == 0 && jb.closed {
-		return 0, false
 	}
 	id := jb.ids[jb.head]
 	jb.head = (jb.head + 1) % jb.capacity
@@ -66,8 +65,8 @@ func (jb *JobsQueue) Pop() (int, bool) {
 
 func (jb *JobsQueue) Close() {
 	jb.mu.Lock()
-	defer jb.mu.Unlock()
 	jb.closed = true
+	jb.mu.Unlock()
 	jb.cond.Broadcast()
 	//// debug
 	//buf := make([]byte, 1<<10)

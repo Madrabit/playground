@@ -75,7 +75,12 @@ func (w *Worker) Loop() {
 			w.state.Store(Busy)
 			go func() {
 				state, err := w.Process(job, cancel)
-				select {
+				resChan <- Results{
+					job.ID,
+					state,
+					err,
+				}
+				/*select {
 				case <-cancel:
 					return
 				case resChan <- Results{
@@ -84,11 +89,11 @@ func (w *Worker) Loop() {
 					err,
 				}:
 					return
-				}
+				}*/
 			}()
 			select {
 			case <-w.stop:
-				defer close(cancel)
+				close(cancel)
 				w.wg.Done()
 				fmt.Println("cancel in worker")
 				return
@@ -149,8 +154,9 @@ func (w *Worker) CheckHealth() {
 			return
 		case <-timer.C:
 			w.heartBeat <- HeartBeat{w.ID, time.Now()}
-			timer.Reset(1 * time.Second)
+
 		}
+		timer.Reset(1 * time.Second)
 	}
 }
 
