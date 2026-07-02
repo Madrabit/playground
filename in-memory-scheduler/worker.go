@@ -132,11 +132,12 @@ func (w *Worker) Process(j Job, cancel <-chan struct{}) (JobStatus, error) {
 
 func (w *Worker) Enqueue(job Job) {
 	fmt.Println("Enqueue", job.ID)
-	job.State = Running
+	newJob := job
+	newJob.State = Running
 	select {
 	case <-w.stop:
 		return
-	case w.jobs <- job:
+	case w.jobs <- newJob:
 		return
 	}
 }

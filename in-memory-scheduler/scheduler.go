@@ -84,6 +84,12 @@ func NewScheduler(
 	return s
 }
 
+/*
+Гарантии:
+- activeWorkers получается LastSeen без гонок
+- проверка мертвых воркеров
+- все фоновые процессы Шедулера и работа их вплоть до Stop
+*/
 func (s *Scheduler) Start() {
 	s.goSafe("DispatchLoop", s.DispatchLoop)
 	s.goSafe("MergeResults", s.MergeResults)
@@ -132,8 +138,14 @@ func (s *Scheduler) goSafe(name string, fun func()) {
 	}()
 }
 
+/*
+	Гарантии:
+
+Закрытие всех очередей
+Сигнал стоп всем зависимым командам
+Все фоновые горутины доработают до конца
+*/
 func (s *Scheduler) Stop() {
-	// 1. Больше не принимаем новые задачи
 	s.highQueue.Close()
 	s.normalQueue.Close()
 	close(s.stop)
