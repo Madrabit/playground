@@ -34,14 +34,15 @@ func TestVisibilityMutex(t *testing.T) {
 		mu.Unlock()
 	}()
 	go func() {
-		mu.Lock()
-		r := ready
-		v := value
-		mu.Unlock()
-		for !r {
-
+		for {
+			mu.Lock()
+			if ready {
+				fmt.Println(value)
+				mu.Unlock()
+				break
+			}
+			mu.Unlock()
 		}
-		fmt.Println(v)
 	}()
 }
 
@@ -86,10 +87,24 @@ func BenchmarkFalseSharing(b *testing.B) {
 		}
 		m := Metrics{}
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			m.A.Add(1)
-			m.B.Add(1)
-		}
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 1_000_000; i++ {
+				m.A.Add(1)
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 1_000_000; i++ {
+				m.B.Add(1)
+			}
+		}()
+
+		wg.Wait()
 	})
 	b.Run("padding", func(b *testing.B) {
 		type Metrics struct {
@@ -99,9 +114,23 @@ func BenchmarkFalseSharing(b *testing.B) {
 		}
 		m := Metrics{}
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			m.A.Add(1)
-			m.B.Add(1)
-		}
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 1_000_000; i++ {
+				m.A.Add(1)
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 1_000_000; i++ {
+				m.B.Add(1)
+			}
+		}()
+
+		wg.Wait()
 	})
 }
