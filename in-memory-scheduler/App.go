@@ -30,7 +30,7 @@ func NewApp() *App {
 	validationRequest := make(chan ValidationRequest, 1024)
 	results := make([]chan Results, 0, 1024)
 	heartBeat := make(chan HeartBeat, 1024)
-	validator := NewValidator(ctx, validationRequest)
+	validator := NewValidator(validationRequest)
 	Register("print", NewPrintProcessor)
 	processor, err := CreateProcessor("print")
 	if err != nil {
@@ -39,7 +39,7 @@ func NewApp() *App {
 	normalQueue := NewJobsQueue() // нужно ли очередь отключать через контекст, она сейчас отключается через cond
 	highQueue := NewJobsQueue()
 	cpus := runtime.NumCPU()
-	scheduler := NewScheduler(ctx, validator, normalQueue, highQueue, validationRequest, results, heartBeat)
+	scheduler := NewScheduler(validator, normalQueue, highQueue, validationRequest, results, heartBeat)
 	return &App{
 		ctx:       ctx,
 		cancel:    cancel,
@@ -61,11 +61,11 @@ type Queue interface {
 }
 
 type WorkerI interface {
-	Loop()
+	Loop(ctx context.Context)
 	Process(ctx context.Context, j Job) (JobStatus, error)
 	Enqueue(job Job)
-	CheckHealth()
-	Start()
+	CheckHealth(ctx context.Context)
+	Start(ctx context.Context)
 	IsBusy() bool
 	IsIdle() bool
 	IsStopped() bool
@@ -95,7 +95,7 @@ func (app *App) startWorkers(cpus int) {
 	)(app.processor)
 	for i := 0; i < n; i++ {
 		resultChan := make(chan Results)
-		w := NewWorker(app.ctx, i, resultChan, processor, app.heartBeat, &app.scheduler.jobsWg)
+		w := NewWorker(i, resultChan, processor, app.heartBeat, &app.scheduler.jobsWg)
 		app.workers[i] = w
 		app.results = append(app.results, resultChan)
 		app.scheduler.results = append(app.scheduler.results, resultChan)
@@ -111,7 +111,7 @@ func (app *App) StartWorker(w WorkerI) {
 	go func() {
 		defer app.goroutines.Add(-1)
 		defer app.wg.Done()
-		w.Start()
+		w.Start(app.ctx)
 	}()
 }
 

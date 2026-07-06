@@ -15,7 +15,6 @@ const (
 )
 
 type Worker struct {
-	ctx       context.Context
 	ID        int
 	stop      chan struct{}
 	jobs      chan Job
@@ -31,9 +30,8 @@ type Processor interface {
 	Process(ctx context.Context, job Job) (JobStatus, error)
 }
 
-func NewWorker(ctx context.Context, ID int, results chan Results, processor Processor, heartBeat chan<- HeartBeat, wg *sync.WaitGroup) *Worker {
+func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan<- HeartBeat, wg *sync.WaitGroup) *Worker {
 	return &Worker{
-		ctx:       ctx,
 		ID:        ID,
 		stop:      make(chan struct{}),
 		jobs:      make(chan Job),
@@ -44,7 +42,7 @@ func NewWorker(ctx context.Context, ID int, results chan Results, processor Proc
 	}
 }
 
-func (w *Worker) Loop() {
+func (w *Worker) Loop(ctx context.Context) {
 	timer := time.NewTimer(0)
 	if !timer.Stop() {
 		select {
@@ -77,7 +75,7 @@ func (w *Worker) Loop() {
 			cancel := make(chan struct{})
 			w.state.Store(Busy)
 			go func() {
-				state, err := w.Process(w.ctx, job)
+				state, err := w.Process(ctx, job)
 				resChan <- Results{
 					job.ID,
 					state,
@@ -117,11 +115,17 @@ func (w *Worker) Loop() {
 	}
 }
 
+// Отмена процесса по таймауту 1 секунда
+//
 //go:noinline
 func (w *Worker) Process(ctx context.Context, j Job) (JobStatus, error) {
-	process, err := w.processor.Process(ctx, j)
+	const jobTimeout = time.Second * 1
+	jobCtx, cancel := context.WithTimeout(ctx, jobTimeout)
+	defer cancel()
+	process, err := w.processor.Process(jobCtx, j)
 	return process, err
 }
+
 func (w *Worker) Enqueue(job Job) {
 	fmt.Println("Enqueue", job.ID)
 	newJob := job
@@ -138,13 +142,12 @@ func (w *Worker) Stop() {
 	close(w.stop)
 }
 
-func (w *Worker) CheckHealth() {
+func (w *Worker) CheckHealth(ctx context.Context) {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 	for {
 		select {
-		case <-w.ctx.Done():
-			return
+		case <-ctx.Done():
 		case <-timer.C:
 			w.heartBeat <- HeartBeat{w.ID, time.Now()}
 
@@ -153,10 +156,12 @@ func (w *Worker) CheckHealth() {
 	}
 }
 
-func (w *Worker) Start() {
+func (w *Worker) Start(ctx context.Context) {
 	w.once.Do(func() {
-		go w.CheckHealth()
-		go w.Loop()
+		go func() {
+			w.CheckHealth(ctx)
+		}()
+		go w.Loop(ctx)
 	})
 }
 

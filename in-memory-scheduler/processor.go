@@ -126,10 +126,6 @@ func NewHangingProcessor() Processor {
 }
 
 func (h *HangingProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
-	select {
-	case <-ctx.Done():
-		return Cancelled, nil
-	default:
-		select {} // висим навсегда
-	}
+	<-ctx.Done()
+	return Cancelled, nil
 }
