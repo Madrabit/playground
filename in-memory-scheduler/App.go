@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"runtime"
@@ -10,6 +11,8 @@ import (
 )
 
 type App struct {
+	ctx        context.Context
+	cancel     context.CancelFunc
 	validator  *Validator
 	scheduler  *Scheduler
 	workers    []WorkerI
@@ -23,20 +26,23 @@ type App struct {
 }
 
 func NewApp() *App {
+	ctx, cancel := context.WithCancel(context.Background())
 	validationRequest := make(chan ValidationRequest, 1024)
 	results := make([]chan Results, 0, 1024)
 	heartBeat := make(chan HeartBeat, 1024)
-	validator := NewValidator(validationRequest)
+	validator := NewValidator(ctx, validationRequest)
 	Register("print", NewPrintProcessor)
 	processor, err := CreateProcessor("print")
 	if err != nil {
 		log.Printf("error creating processor %v\n", err)
 	}
-	normalQueue := NewJobsQueue()
+	normalQueue := NewJobsQueue() // нужно ли очередь отключать через контекст, она сейчас отключается через cond
 	highQueue := NewJobsQueue()
 	cpus := runtime.NumCPU()
-	scheduler := NewScheduler(validator, normalQueue, highQueue, validationRequest, results, heartBeat)
+	scheduler := NewScheduler(ctx, validator, normalQueue, highQueue, validationRequest, results, heartBeat)
 	return &App{
+		ctx:       ctx,
+		cancel:    cancel,
 		validator: validator,
 		scheduler: scheduler,
 		cpus:      cpus,
@@ -56,7 +62,7 @@ type Queue interface {
 
 type WorkerI interface {
 	Loop()
-	Process(j Job, cancel <-chan struct{}) (JobStatus, error)
+	Process(ctx context.Context, j Job) (JobStatus, error)
 	Enqueue(job Job)
 	CheckHealth()
 	Start()
@@ -89,7 +95,7 @@ func (app *App) startWorkers(cpus int) {
 	)(app.processor)
 	for i := 0; i < n; i++ {
 		resultChan := make(chan Results)
-		w := NewWorker(i, resultChan, processor, app.heartBeat, &app.scheduler.jobsWg)
+		w := NewWorker(app.ctx, i, resultChan, processor, app.heartBeat, &app.scheduler.jobsWg)
 		app.workers[i] = w
 		app.results = append(app.results, resultChan)
 		app.scheduler.results = append(app.scheduler.results, resultChan)

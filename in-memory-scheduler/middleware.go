@@ -1,14 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
 
 func LoggingMiddleware(next Processor) Processor {
-	return ProcessFunc(func(job Job, cancel <-chan struct{}) (JobStatus, error) {
+	return ProcessFunc(func(ctx context.Context, job Job) (JobStatus, error) {
 		fmt.Println("logging before")
-		jobStatus, err := next.Process(job, cancel)
+		jobStatus, err := next.Process(ctx, job)
 		fmt.Println("logging after")
 		return jobStatus, err
 	})
@@ -28,12 +29,12 @@ func (e RetryableError) Unwrap() error {
 
 func RetryMiddleware(attempts int) Middleware {
 	return func(next Processor) Processor {
-		return ProcessFunc(func(job Job, cancel <-chan struct{}) (JobStatus, error) {
+		return ProcessFunc(func(ctx context.Context, job Job) (JobStatus, error) {
 			var state JobStatus
 			var err error
 			var retryErr *RetryableError
 			for i := 0; i < attempts; i++ {
-				state, err := next.Process(job, cancel)
+				state, err := next.Process(ctx, job)
 				if errors.As(err, &retryErr) {
 					continue
 				}

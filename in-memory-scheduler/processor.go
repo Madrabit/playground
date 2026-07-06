@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -11,12 +12,12 @@ func NewPrintProcessor() Processor {
 	return &PrintProcessor{}
 }
 
-func (print *PrintProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+func (print *PrintProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
 	//fmt.Printf("pid:%d", job.ID)
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
 	select {
-	case <-cancel:
+	case <-ctx.Done():
 		return Cancelled, nil
 	case <-timer.C:
 		x := job.ID + 1
@@ -35,11 +36,11 @@ func NewSleepProcessor() Processor {
 	return &SleepProcessor{}
 }
 
-func (p *SleepProcessor) Process(_ Job, cancel <-chan struct{}) (JobStatus, error) {
+func (p *SleepProcessor) Process(ctx context.Context, _ Job) (JobStatus, error) {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 	select {
-	case <-cancel:
+	case <-ctx.Done():
 		return Cancelled, nil
 	case <-timer.C:
 		return Pending, nil
@@ -50,11 +51,11 @@ type FailProcessor struct{}
 
 func NewFailProcessor() Processor { return &FailProcessor{} }
 
-func (p *FailProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+func (p *FailProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 	select {
-	case <-cancel:
+	case <-ctx.Done():
 		return Cancelled, nil
 	case <-timer.C:
 		fmt.Printf("Proccess ID: %d", job.ID)
@@ -68,12 +69,12 @@ func NewLongProcessor() Processor {
 	return &LongProcessor{}
 }
 
-func (p *LongProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+func (p *LongProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
 	fmt.Println("long process started")
 	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
 	select {
-	case <-cancel:
+	case <-ctx.Done():
 		fmt.Println("cancelled long process")
 		return Cancelled, nil
 	case <-timer.C:
@@ -82,10 +83,10 @@ func (p *LongProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, err
 	}
 }
 
-type ProcessFunc func(job Job, cancel <-chan struct{}) (JobStatus, error)
+type ProcessFunc func(ctx context.Context, job Job) (JobStatus, error)
 
-func (f ProcessFunc) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
-	return f(job, cancel)
+func (f ProcessFunc) Process(ctx context.Context, job Job) (JobStatus, error) {
+	return f(ctx, job)
 }
 
 var registry = make(map[string]ProcessFactory)
@@ -124,11 +125,11 @@ func NewHangingProcessor() Processor {
 	return &HangingProcessor{stop: make(chan struct{})}
 }
 
-func (h *HangingProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+func (h *HangingProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
 	select {
-	case <-cancel:
+	case <-ctx.Done():
 		return Cancelled, nil
-	case <-h.stop:
-		return Done, nil
+	default:
+		select {} // висим навсегда
 	}
 }

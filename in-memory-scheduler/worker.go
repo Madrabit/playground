@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ const (
 )
 
 type Worker struct {
+	ctx       context.Context
 	ID        int
 	stop      chan struct{}
 	jobs      chan Job
@@ -26,11 +28,12 @@ type Worker struct {
 }
 
 type Processor interface {
-	Process(job Job, cancel <-chan struct{}) (JobStatus, error)
+	Process(ctx context.Context, job Job) (JobStatus, error)
 }
 
-func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan<- HeartBeat, wg *sync.WaitGroup) *Worker {
+func NewWorker(ctx context.Context, ID int, results chan Results, processor Processor, heartBeat chan<- HeartBeat, wg *sync.WaitGroup) *Worker {
 	return &Worker{
+		ctx:       ctx,
 		ID:        ID,
 		stop:      make(chan struct{}),
 		jobs:      make(chan Job),
@@ -74,22 +77,12 @@ func (w *Worker) Loop() {
 			cancel := make(chan struct{})
 			w.state.Store(Busy)
 			go func() {
-				state, err := w.Process(job, cancel)
+				state, err := w.Process(w.ctx, job)
 				resChan <- Results{
 					job.ID,
 					state,
 					err,
 				}
-				/*select {
-				case <-cancel:
-					return
-				case resChan <- Results{
-					job.ID,
-					state,
-					err,
-				}:
-					return
-				}*/
 			}()
 			select {
 			case <-w.stop:
@@ -125,11 +118,10 @@ func (w *Worker) Loop() {
 }
 
 //go:noinline
-func (w *Worker) Process(j Job, cancel <-chan struct{}) (JobStatus, error) {
-	process, err := w.processor.Process(j, cancel)
+func (w *Worker) Process(ctx context.Context, j Job) (JobStatus, error) {
+	process, err := w.processor.Process(ctx, j)
 	return process, err
 }
-
 func (w *Worker) Enqueue(job Job) {
 	fmt.Println("Enqueue", job.ID)
 	newJob := job
@@ -151,7 +143,7 @@ func (w *Worker) CheckHealth() {
 	defer timer.Stop()
 	for {
 		select {
-		case <-w.stop:
+		case <-w.ctx.Done():
 			return
 		case <-timer.C:
 			w.heartBeat <- HeartBeat{w.ID, time.Now()}
