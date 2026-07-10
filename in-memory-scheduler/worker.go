@@ -132,10 +132,6 @@ func (w *Worker) Process(ctx context.Context, j Job) (JobStatus, error) {
 	const jobTimeout = time.Second * 1
 	jobCtx, cancel := context.WithTimeout(ctx, jobTimeout)
 	defer cancel()
-	deadline, ok := jobCtx.Deadline()
-	if ok {
-		fmt.Println("remaining: ", time.Until(deadline))
-	}
 	process, err := w.processor.Process(jobCtx, j)
 	return process, err
 }

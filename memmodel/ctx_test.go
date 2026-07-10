@@ -12,11 +12,9 @@ import (
 func TestCtxPropagation(t *testing.T) {
 	parent, cancelParent := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancelParent()
-	child, cancelChild := context.WithTimeout(parent, 500*time.Millisecond)
-	defer cancelChild()
-	if errors.Is(child.Err(), context.DeadlineExceeded) {
-		t.Fatalf("expected DeadlineExceeded, got %v", child.Err())
-	}
+	child, _ := context.WithTimeout(parent, 500*time.Millisecond)
+	<-child.Done()
+	fmt.Println(child.Err())
 }
 
 func TestCtxCanceled(t *testing.T) {
@@ -48,13 +46,16 @@ func worker(ctx context.Context) {
 }
 
 func TestNoCancelGoroutineLeaks(t *testing.T) {
-	fmt.Println("before: ", runtime.NumGoroutine())
+	before := runtime.NumGoroutine()
 	ctx, _ := context.WithCancel(context.Background())
 
 	go worker(ctx)
 	//cancel()
 	time.Sleep(200 * time.Millisecond)
-	fmt.Println("after: ", runtime.NumGoroutine())
+	after := runtime.NumGoroutine()
+	if after <= before {
+		t.Fatal("should be goroutine leak")
+	}
 }
 
 func TestContextImmutability(t *testing.T) {
@@ -64,23 +65,22 @@ func TestContextImmutability(t *testing.T) {
 	defer cancelChild2()
 	cancelChild1()
 	if !errors.Is(child1.Err(), context.Canceled) {
-		fmt.Println("expected canceled, got %w", child1.Err())
+		t.Errorf("expected canceled, got %v", child1.Err())
 	}
 	if !errors.Is(child2.Err(), context.Canceled) {
-		fmt.Println("expected canceled, got %w", child2.Err())
+		t.Errorf("expected canceled, got %v", child2.Err())
 	}
 	if parent.Err() != nil {
-		fmt.Println("expected nil, got %w", parent.Err())
+		t.Errorf("expected nil, got %v", parent.Err())
 	}
 	cancelParent()
 	if !errors.Is(child1.Err(), context.Canceled) {
-		fmt.Println("expected canceled, got %w", child1.Err())
+		t.Errorf("expected canceled, got %v", child1.Err())
 	}
 	if !errors.Is(child2.Err(), context.Canceled) {
-		fmt.Println("expected canceled, got %w", child2.Err())
+		t.Errorf("expected canceled, got %v", child2.Err())
 	}
 	if !errors.Is(parent.Err(), context.Canceled) {
-		fmt.Println("expected canceled, got %w", parent.Err())
+		t.Errorf("expected canceled, got %v", parent.Err())
 	}
-
 }
