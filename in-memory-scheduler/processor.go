@@ -129,3 +129,36 @@ func (h *HangingProcessor) Process(ctx context.Context, job Job) (JobStatus, err
 	<-ctx.Done()
 	return Cancelled, nil
 }
+
+type CanceledProcessor struct {
+}
+
+func NewCanceledProcessor() Processor {
+	return &CanceledProcessor{}
+}
+
+func (p *CanceledProcessor) Process(ctx context.Context, _ Job) (JobStatus, error) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return Cancelled, nil
+		case <-ticker.C:
+		}
+	}
+
+}
+
+type NotCanceledProcessor struct {
+}
+
+func NewNotCanceledProcessor() Processor {
+	return &NotCanceledProcessor{}
+}
+
+func (p *NotCanceledProcessor) Process(ctx context.Context, _ Job) (JobStatus, error) {
+	for {
+		time.Sleep(1 * time.Second)
+	}
+}

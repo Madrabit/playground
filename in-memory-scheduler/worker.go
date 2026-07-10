@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,12 +46,7 @@ func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan
 
 func (w *Worker) Loop(ctx context.Context) {
 	timer := time.NewTimer(0)
-	if !timer.Stop() {
-		select {
-		case <-timer.C:
-		default:
-		}
-	}
+	stopTime(timer)
 	defer func() {
 		timer.Stop()
 		w.state.Store(StoppedWorker)
@@ -64,15 +61,9 @@ func (w *Worker) Loop(ctx context.Context) {
 				return
 			}
 			fmt.Println("Worker got job", job.ID)
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			stopTime(timer)
 			timer.Reset(1 * time.Second)
 			resChan := make(chan Results, 1)
-			cancel := make(chan struct{})
 			w.state.Store(Busy)
 			go func() {
 				state, err := w.Process(ctx, job)
@@ -84,19 +75,14 @@ func (w *Worker) Loop(ctx context.Context) {
 			}()
 			select {
 			case <-w.stop:
-				close(cancel)
 				w.wg.Done()
 				fmt.Println("cancel in worker")
 				return
 			case res := <-resChan:
 				w.wg.Done()
+				res = normalizeResult(res)
 				w.results <- res
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
+				stopTime(timer)
 			case <-timer.C:
 				select {
 				case <-w.stop:
@@ -115,6 +101,30 @@ func (w *Worker) Loop(ctx context.Context) {
 	}
 }
 
+func normalizeResult(res Results) Results {
+	switch {
+	case errors.Is(res.Error, context.Canceled):
+		res.State = Cancelled
+	// таймаут — ошибка SLA
+	case errors.Is(res.Error, context.DeadlineExceeded):
+		log.Println("timeout:", res.JobID)
+		res.State = Failed
+	case res.Error != nil:
+		log.Println("processor error:", res.Error)
+		res.State = Failed
+	}
+	return res
+}
+
+func stopTime(t *time.Timer) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+}
+
 // Отмена процесса по таймауту 1 секунда
 //
 //go:noinline
@@ -122,6 +132,10 @@ func (w *Worker) Process(ctx context.Context, j Job) (JobStatus, error) {
 	const jobTimeout = time.Second * 1
 	jobCtx, cancel := context.WithTimeout(ctx, jobTimeout)
 	defer cancel()
+	deadline, ok := jobCtx.Deadline()
+	if ok {
+		fmt.Println("remaining: ", time.Until(deadline))
+	}
 	process, err := w.processor.Process(jobCtx, j)
 	return process, err
 }
@@ -148,6 +162,7 @@ func (w *Worker) CheckHealth(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
 		case <-timer.C:
 			w.heartBeat <- HeartBeat{w.ID, time.Now()}
 
@@ -158,9 +173,7 @@ func (w *Worker) CheckHealth(ctx context.Context) {
 
 func (w *Worker) Start(ctx context.Context) {
 	w.once.Do(func() {
-		go func() {
-			w.CheckHealth(ctx)
-		}()
+		go w.CheckHealth(ctx)
 		go w.Loop(ctx)
 	})
 }
