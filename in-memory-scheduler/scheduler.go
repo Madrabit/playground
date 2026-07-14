@@ -131,7 +131,6 @@ func (s *Scheduler) goSafe(name string, fun func()) {
 	s.wg.Add(1)
 	s.goroutines.Add(1)
 	go func() {
-		defer fmt.Println("EXIT:", name)
 		defer s.wg.Done()
 		defer s.goroutines.Add(-1)
 		fun()

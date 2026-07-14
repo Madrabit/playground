@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -13,11 +14,11 @@ func NewFakeProcessor() Processor {
 	return &FakeProcessor{}
 }
 
-func (f FakeProcessor) Process(job Job, cancel <-chan struct{}) (JobStatus, error) {
+func (f FakeProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 	select {
-	case <-cancel:
+	case <-ctx.Done():
 		return Cancelled, nil
 	case <-timer.C:
 		fmt.Printf("Proccess ID: %d", job.ID)
@@ -36,7 +37,9 @@ func TestWorkerProcessesJob(t *testing.T) {
 
 	var wg sync.WaitGroup
 	worker := NewWorker(1, results, processor, heartBeat, &wg)
-	worker.Start()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker.Start(ctx)
 	job := Job{
 		ID:   1,
 		Name: "Test",
@@ -64,7 +67,9 @@ func TestWorkerCancelsJob(t *testing.T) {
 
 	var wg sync.WaitGroup
 	worker := NewWorker(1, results, processor, heartBeat, &wg)
-	worker.Start()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker.Start(ctx)
 
 	job := Job{ID: 1}
 

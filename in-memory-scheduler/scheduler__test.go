@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -23,7 +24,10 @@ func TestIntegration_SchedulerEndToEnd(t *testing.T) {
 	// --- Storage (in-memory) ---
 	storage := NewStorage() // твой реальный in-memory storage
 	job := Job{ID: 1, Name: "TestJob"}
-	storage.Save(job) // кладём job в storage
+	err := storage.Save(job)
+	if err != nil {
+		return
+	} // кладём job в storage
 
 	// --- Processor (фейковый, но настоящий) ---
 	Register("fake", func() Processor { return &FakeProcessor{} })
@@ -32,7 +36,9 @@ func TestIntegration_SchedulerEndToEnd(t *testing.T) {
 	var wg sync.WaitGroup
 	// --- Worker ---
 	worker := NewWorker(1, results[0], processor, heartBeat, &wg)
-	worker.Start()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker.Start(ctx)
 
 	// --- Scheduler ---
 	scheduler := NewScheduler(
