@@ -115,3 +115,70 @@ func TestMergeResults(t *testing.T) {
 		}
 	}
 }
+
+func TestPanicProcessor(t *testing.T) {
+
+	validationRequest := make(chan ValidationRequest, 10)
+	results := []chan Results{make(chan Results, 10)}
+	heartBeat := make(chan HeartBeat, 10)
+
+	validator := NewValidator(validationRequest)
+	go validator.Loop() // запускаем реальный валидатор
+
+	highQueue := NewJobsQueue()
+	normalQueue := NewJobsQueue()
+
+	storage := NewStorage()
+	job := Job{ID: 1, Name: "TestJob"}
+	err := storage.Save(job)
+	if err != nil {
+		return
+	}
+
+	// --- Processor (фейковый, но настоящий) ---
+	Register("panic", NewPanicProcessor)
+	processor, _ := CreateProcessor("panic")
+
+	var wg sync.WaitGroup
+	// --- Worker ---
+	worker := NewWorker(1, results[0], processor, heartBeat, &wg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker.Start(ctx)
+
+	// --- Scheduler ---
+	scheduler := NewScheduler(
+		validator,
+		normalQueue,
+		highQueue,
+		validationRequest,
+		results,
+		heartBeat,
+	)
+	scheduler.reader = storage
+	scheduler.workers = []WorkerI{worker}
+
+	go scheduler.DispatchLoop()
+
+	// --- Кладём job в очередь ---
+	highQueue.Push(1)
+
+	// --- Ждём результат ---
+	select {
+	case res := <-results[0]:
+		if res.JobID != 1 {
+			t.Fatalf("expected job ID=1, got %d", res.JobID)
+		}
+		// FakeProcessor возвращает Failed
+		if res.State != Failed {
+			t.Fatalf("expected Failed, got %v", res.State)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	// --- Останавливаем всё ---
+	time.Sleep(100 * time.Millisecond)
+	scheduler.Stop()
+	worker.Stop()
+}

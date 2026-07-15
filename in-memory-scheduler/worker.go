@@ -66,6 +66,11 @@ func (w *Worker) Loop(ctx context.Context) {
 			resChan := make(chan Results, 1)
 			w.state.Store(Busy)
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Println("Worker got panic", r)
+					}
+				}()
 				state, err := w.Process(ctx, job)
 				resChan <- Results{
 					job.ID,

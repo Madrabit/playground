@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,11 +130,17 @@ func (s *Scheduler) Start() {
 }
 
 func (s *Scheduler) goSafe(name string, fun func()) {
+
 	s.wg.Add(1)
 	s.goroutines.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer s.goroutines.Add(-1)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("goroutine %s panic: %v\n%s", name, r, debug.Stack())
+			}
+		}()
 		fun()
 	}()
 }

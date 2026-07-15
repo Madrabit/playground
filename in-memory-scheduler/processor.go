@@ -162,3 +162,14 @@ func (p *NotCanceledProcessor) Process(ctx context.Context, _ Job) (JobStatus, e
 		time.Sleep(1 * time.Second)
 	}
 }
+
+type PanicProcessor struct {
+}
+
+func NewPanicProcessor() Processor {
+	return &PanicProcessor{}
+}
+
+func (p *PanicProcessor) Process(ctx context.Context, _ Job) (JobStatus, error) {
+	panic("boom")
+}
