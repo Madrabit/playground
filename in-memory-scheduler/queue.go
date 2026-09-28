@@ -29,6 +29,8 @@ func NewJobsQueue() *JobsQueue {
 }
 
 func (jb *JobsQueue) Len() int {
+	jb.mu.Lock()
+	defer jb.mu.Unlock()
 	return jb.size
 }
 

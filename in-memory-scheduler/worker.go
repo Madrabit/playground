@@ -68,7 +68,11 @@ func (w *Worker) Loop(ctx context.Context) {
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
-						fmt.Println("Worker got panic", r)
+						resChan <- Results{
+							JobID: job.ID,
+							State: Failed,
+							Error: fmt.Errorf("panic: %v", r),
+						}
 					}
 				}()
 				state, err := w.Process(ctx, job)

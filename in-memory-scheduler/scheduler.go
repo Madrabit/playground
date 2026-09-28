@@ -167,9 +167,9 @@ func (s *Scheduler) Add(j Job) error {
 	} else {
 		q = s.normalQueue
 	}
-	if q.Len() >= maxPendingJobs {
-		return ErrQueueFull
-	}
+	//if q.Len() >= maxPendingJobs {
+	//	return ErrQueueFull
+	//}
 	err := q.Push(j.ID)
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
