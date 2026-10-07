@@ -88,10 +88,10 @@ func (w *Worker) Loop(ctx context.Context) {
 				fmt.Println("cancel in worker")
 				return
 			case res := <-resChan:
-				w.wg.Done()
 				res = normalizeResult(res)
 				w.results <- res
 				stopTime(timer)
+				w.wg.Done()
 			case <-timer.C:
 				select {
 				case <-w.stop:

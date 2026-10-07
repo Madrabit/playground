@@ -7,7 +7,17 @@ import (
 )
 
 func TestDoubleGoroutineRecover(t *testing.T) {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("caught:", r)
+			}
+		}()
 		panic("boom 1")
 	}()
 	go func() {
@@ -19,7 +29,9 @@ func TestDoubleGoroutineRecover(t *testing.T) {
 		panic("boom 2")
 	}()
 	go func() {
-		defer recover()
+		defer func() {
+			recover()
+		}()
 		panic("boom 3")
 	}()
 	time.Sleep(10 * time.Second)
@@ -40,6 +52,12 @@ func c() {
 }
 
 func TestStackUnwinding(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r != "boom 1" {
+			t.Errorf("expected panic boom 1, got %v", r)
+		}
+	}()
 	a()
 }
 
@@ -79,6 +97,11 @@ func TestLogPanic(t *testing.T) {
 }
 
 func TestRepanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != "boom" {
+			t.Errorf("expected boom %v", r) // снова кидаем
+		}
+	}()
 	defer func() {
 		if r := recover(); r != nil {
 			panic(r) // снова кидаем

@@ -100,5 +100,4 @@ func TestQueueConcurrentPushPop(t *testing.T) {
 		}
 	}()
 	wg.Wait()
-
 }

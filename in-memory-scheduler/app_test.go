@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"runtime/trace"
 	"testing"
@@ -48,7 +49,7 @@ func TestFatJobs(t *testing.T) {
 	// отправляем много задач
 	for i := 1; i <= totalJobs; i++ {
 		err := app.scheduler.Add(Job{ID: i, Name: "Test"})
-		if err == ErrQueueFull {
+		if errors.Is(err, ErrQueueFull) {
 			rejected++
 		} else if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -56,13 +57,10 @@ func TestFatJobs(t *testing.T) {
 			accepted++
 		}
 	}
-
 	// даём системе поработать
 	time.Sleep(2 * time.Second)
-
 	// останавливаем
 	app.Stop()
-
 	// считаем обработанные задачи
 	processed := 0
 	for i := 1; i <= totalJobs; i++ {

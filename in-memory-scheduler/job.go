@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 )
 
 const maxJobs = 1000
@@ -29,6 +31,13 @@ func NewJob(ID int, Name string) *Job {
 		Tags:  make(map[string]struct{}),
 		Attrs: make(map[string]string),
 	}
+}
+
+func (j Job) Clone() Job {
+	j.Tags = maps.Clone(j.Tags)
+	j.Attrs = maps.Clone(j.Attrs)
+	j.SomeSlice = slices.Clone(j.SomeSlice)
+	return j
 }
 
 func (j Job) FirstLetter() rune {

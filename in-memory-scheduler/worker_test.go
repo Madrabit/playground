@@ -44,6 +44,7 @@ func TestWorkerProcessesJob(t *testing.T) {
 		ID:   1,
 		Name: "Test",
 	}
+	wg.Add(1)
 	worker.Enqueue(job)
 	select {
 	case res := <-results:
@@ -68,15 +69,14 @@ func TestWorkerCancelsJob(t *testing.T) {
 	var wg sync.WaitGroup
 	worker := NewWorker(1, results, processor, heartBeat, &wg)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	worker.Start(ctx)
 
 	job := Job{ID: 1}
-
+	wg.Add(1)
 	worker.Enqueue(job)
 
 	// Останавливаем воркер сразу → cancel должен сработать
-	worker.Stop()
+	cancel()
 
 	select {
 	case res := <-results:

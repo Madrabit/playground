@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 )
@@ -32,15 +31,6 @@ func TestIntegration_SchedulerEndToEnd(t *testing.T) {
 	// --- Processor (фейковый, но настоящий) ---
 	Register("fake", func() Processor { return &FakeProcessor{} })
 	processor, _ := CreateProcessor("fake")
-
-	var wg sync.WaitGroup
-	// --- Worker ---
-	worker := NewWorker(1, results[0], processor, heartBeat, &wg)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	worker.Start(ctx)
-
-	// --- Scheduler ---
 	scheduler := NewScheduler(
 		validator,
 		normalQueue,
@@ -49,6 +39,14 @@ func TestIntegration_SchedulerEndToEnd(t *testing.T) {
 		results,
 		heartBeat,
 	)
+	// --- Worker ---
+	worker := NewWorker(1, results[0], processor, heartBeat, &scheduler.jobsWg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker.Start(ctx)
+
+	// --- Scheduler ---
+
 	scheduler.reader = storage
 	scheduler.workers = []WorkerI{worker}
 
@@ -138,15 +136,6 @@ func TestPanicProcessor(t *testing.T) {
 	// --- Processor (фейковый, но настоящий) ---
 	Register("panic", NewPanicProcessor)
 	processor, _ := CreateProcessor("panic")
-
-	var wg sync.WaitGroup
-	// --- Worker ---
-	worker := NewWorker(1, results[0], processor, heartBeat, &wg)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	worker.Start(ctx)
-
-	// --- Scheduler ---
 	scheduler := NewScheduler(
 		validator,
 		normalQueue,
@@ -155,6 +144,14 @@ func TestPanicProcessor(t *testing.T) {
 		results,
 		heartBeat,
 	)
+	// --- Worker ---
+	worker := NewWorker(1, results[0], processor, heartBeat, &scheduler.jobsWg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker.Start(ctx)
+
+	// --- Scheduler ---
+
 	scheduler.reader = storage
 	scheduler.workers = []WorkerI{worker}
 
