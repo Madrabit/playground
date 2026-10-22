@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -154,34 +156,159 @@ func (s *Storage) AddTag(id int, tag string) {
 }
 
 func (s *Storage) Snapshot(w io.Writer) error {
+	type snapShot struct {
+		ID    int
+		Name  string
+		State int
+	}
 	s.mu.RLock()
-	version := 0
+
 	ids := make([]int, 0, len(s.jobs))
 	for k := range s.jobs {
 		ids = append(ids, k)
 	}
 	slices.Sort(ids)
-	var br strings.Builder
-	br.WriteString("scheduler-snapshot v " + strconv.Itoa(version+1))
-	br.WriteString("\n")
+	jobs := make([]snapShot, 0, len(ids))
 	for _, id := range ids {
 		j := s.jobs[id]
-		br.WriteString(strconv.Itoa(j.ID))
-		br.WriteString(":")
-		br.WriteString(strconv.Quote(j.Name))
-		br.WriteString(":")
-		br.WriteString(strconv.Itoa(int(j.State)))
-		br.WriteString("\n")
+		jobs = append(jobs, snapShot{
+			ID:    id,
+			Name:  j.Name,
+			State: int(j.State),
+		})
 	}
-	data := br.String()
-	bytes := []byte(data)
 	s.mu.RUnlock()
-	n, err := w.Write(bytes)
-	if err != nil {
-		return fmt.Errorf("error write snapshot: %w", err)
+	version := 0
+	if _, err := fmt.Fprintln(w, "scheduler-snapshot v "+strconv.Itoa(version+1)); err != nil {
+		return fmt.Errorf("scheduler-snapshot v: %w", err)
 	}
-	if n < len(bytes) {
-		return fmt.Errorf("error write snapshot: short write: %w", io.ErrShortWrite)
+	for _, j := range jobs {
+		_, err := fmt.Fprintf(
+			w, "%d:%s:%d\n",
+			j.ID,
+			strconv.Quote(j.Name),
+			j.State,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type storageReader struct {
+	data []byte
+	pos  int64
+}
+
+func (r *storageReader) Read(p []byte) (int, error) {
+	if r.pos >= int64(len(r.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.pos:])
+	r.pos += int64(n)
+	return n, nil
+}
+
+func (s *Storage) Restore(r io.Reader) error {
+	scanner := bufio.NewScanner(r)
+	jobs := make(map[int]Job)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("restore header: %w", err)
+		}
+		return fmt.Errorf("restore: missing header")
+	}
+	header := scanner.Text()
+	if header != "scheduler-snapshot v 1" {
+		return fmt.Errorf("restore: unsupported header %q", header)
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		firstIndex := strings.Index(line, ":")
+		if firstIndex == -1 {
+			return fmt.Errorf("invalid line: %s", line)
+		}
+		secondIndex := strings.LastIndex(line, ":")
+		if secondIndex <= firstIndex {
+			return fmt.Errorf("invalid line: %s", line)
+		}
+		id, err := strconv.Atoi(line[:firstIndex])
+		if err != nil {
+			return fmt.Errorf("error while parsing id: %w", err)
+		}
+		if _, ok := jobs[id]; ok {
+			return fmt.Errorf("job %d already exists", id)
+		}
+		name, err := strconv.Unquote(line[firstIndex+1 : secondIndex])
+		if err != nil {
+			return fmt.Errorf("error while parsing name: %w", err)
+		}
+		state, err := strconv.Atoi(line[secondIndex+1:])
+		if err != nil {
+			return fmt.Errorf("error while parsing state: %w", err)
+		}
+		if state < int(Pending) || state > int(Stopped) {
+			return fmt.Errorf("invalid state: %d", state)
+		}
+		job := Job{
+			ID:    id,
+			Name:  name,
+			State: JobStatus(state),
+		}
+		jobs[job.ID] = job
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("restore scanner error %w", err)
+	}
+	s.mu.Lock()
+	s.jobs = jobs
+	s.mu.Unlock()
+	return nil
+}
+
+type Sink interface {
+	Write() io.Writer // это возвращаемое значение или тип?
+}
+
+func (s *Storage) Flush(sink Sink) error {
+	err := s.Snapshot(sink.Write())
+	if err != nil {
+		return fmt.Errorf("error flushing snapshot %w", err)
+	}
+	return nil
+}
+func (s *Storage) TransferStorage(sink Sink) error {
+	return transferSnapshot(s.Snapshot, sink)
+}
+
+func transferSnapshot(
+	snapshot func(io.Writer) error,
+	sink Sink,
+) error {
+	reader, writer := io.Pipe()
+	exportDone := make(chan error, 1)
+
+	go func() {
+		err := snapshot(writer)
+		_ = writer.CloseWithError(err)
+		exportDone <- err
+	}()
+	_, copyErr := io.Copy(sink.Write(), reader)
+	_ = reader.Close()
+	exportErr := <-exportDone
+	// Если ошибка пришла от Snapshot, сообщаем об экспорте.
+	if copyErr != nil && exportErr != nil &&
+		errors.Is(copyErr, exportErr) {
+		return fmt.Errorf("export snapshot: %w", exportErr)
+	}
+	// Например, Sink.Write() вернул ошибку записи.
+	if copyErr != nil {
+		return fmt.Errorf("write snapshot to sink: %w", copyErr)
+	}
+
+	if exportErr != nil {
+		return fmt.Errorf("export snapshot: %w", exportErr)
 	}
 	return nil
 }
