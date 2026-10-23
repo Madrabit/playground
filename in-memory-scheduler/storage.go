@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -155,7 +156,7 @@ func (s *Storage) AddTag(id int, tag string) {
 	}
 }
 
-func (s *Storage) Snapshot(w io.Writer) error {
+func (s *Storage) Snapshot(ctx context.Context, w io.Writer) error {
 	type snapShot struct {
 		ID    int
 		Name  string
@@ -183,6 +184,9 @@ func (s *Storage) Snapshot(w io.Writer) error {
 		return fmt.Errorf("scheduler-snapshot v: %w", err)
 	}
 	for _, j := range jobs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		_, err := fmt.Fprintf(
 			w, "%d:%s:%d\n",
 			j.ID,
@@ -210,7 +214,7 @@ func (r *storageReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (s *Storage) Restore(r io.Reader) error {
+func (s *Storage) Restore(ctx context.Context, r io.Reader) error {
 	scanner := bufio.NewScanner(r)
 	jobs := make(map[int]Job)
 	if !scanner.Scan() {
@@ -224,6 +228,9 @@ func (s *Storage) Restore(r io.Reader) error {
 		return fmt.Errorf("restore: unsupported header %q", header)
 	}
 	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		line := scanner.Text()
 		firstIndex := strings.Index(line, ":")
 		if firstIndex == -1 {
@@ -271,33 +278,48 @@ type Sink interface {
 	Write() io.Writer // это возвращаемое значение или тип?
 }
 
-func (s *Storage) Flush(sink Sink) error {
-	err := s.Snapshot(sink.Write())
+func (s *Storage) Flush(ctx context.Context, sink Sink) error {
+	err := s.Snapshot(ctx, sink.Write())
 	if err != nil {
 		return fmt.Errorf("error flushing snapshot %w", err)
 	}
 	return nil
 }
-func (s *Storage) TransferStorage(sink Sink) error {
-	return transferSnapshot(s.Snapshot, sink)
+func (s *Storage) TransferStorage(ctx context.Context, sink Sink) error {
+	return transferSnapshot(ctx, s.Snapshot, sink)
 }
 
 func transferSnapshot(
-	snapshot func(io.Writer) error,
+	ctx context.Context,
+	snapshot func(context.Context, io.Writer) error,
 	sink Sink,
 ) error {
 	reader, writer := io.Pipe()
 	exportDone := make(chan error, 1)
-
+	finished := make(chan struct{})
+	defer close(finished)
 	go func() {
-		err := snapshot(writer)
-		_ = writer.CloseWithError(err)
+		select {
+		case <-ctx.Done():
+			writer.CloseWithError(ctx.Err())
+			reader.CloseWithError(ctx.Err())
+		case <-finished:
+			return
+		}
+	}()
+	go func() {
+		err := snapshot(ctx, writer)
+		writer.CloseWithError(err)
 		exportDone <- err
+
 	}()
 	_, copyErr := io.Copy(sink.Write(), reader)
-	_ = reader.Close()
+	_ = reader.CloseWithError(ctx.Err())
 	exportErr := <-exportDone
 	// Если ошибка пришла от Snapshot, сообщаем об экспорте.
+	if ctx.Err() != nil {
+		return fmt.Errorf("transfer snapshot error %w", ctx.Err())
+	}
 	if copyErr != nil && exportErr != nil &&
 		errors.Is(copyErr, exportErr) {
 		return fmt.Errorf("export snapshot: %w", exportErr)
@@ -306,7 +328,6 @@ func transferSnapshot(
 	if copyErr != nil {
 		return fmt.Errorf("write snapshot to sink: %w", copyErr)
 	}
-
 	if exportErr != nil {
 		return fmt.Errorf("export snapshot: %w", exportErr)
 	}

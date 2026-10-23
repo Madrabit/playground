@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"strings"
@@ -30,7 +31,7 @@ func TestSnapshotWriter(t *testing.T) {
 		t.Fatalf("snapshot: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := storage.Snapshot(&buf); err != nil {
+	if err := storage.Snapshot(context.Background(), &buf); err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
 	expected := "scheduler-snapshot v 1\n" +
@@ -62,7 +63,7 @@ func TestSnapshotWriterCutted(t *testing.T) {
 		t.Fatalf("snapshot: %v", err)
 	}
 	var wr shortWriter
-	snapshotErr := storage.Snapshot(&wr)
+	snapshotErr := storage.Snapshot(context.Background(), &wr)
 	if !errors.Is(snapshotErr, io.ErrShortWrite) {
 		t.Fatalf("expected io.ErrShortWrite, got %v", snapshotErr)
 	}
@@ -107,7 +108,7 @@ func TestSnapshotWriterCorrupted(t *testing.T) {
 		t.Fatalf("snapshot: %v", err)
 	}
 	wr := failingWriter{err: testErr}
-	snapshotErr := storage.Snapshot(&wr)
+	snapshotErr := storage.Snapshot(context.Background(), &wr)
 	if !errors.Is(snapshotErr, testErr) {
 		t.Fatalf("expected  %v", snapshotErr)
 	}
@@ -136,7 +137,7 @@ func TestRestoreSuccess(t *testing.T) {
 		t.Fatalf("snapshot: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := storage.Snapshot(&buf); err != nil {
+	if err := storage.Snapshot(context.Background(), &buf); err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
 	secondStorage := NewStorage()
@@ -144,7 +145,7 @@ func TestRestoreSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	err = secondStorage.Restore(&buf)
+	err = secondStorage.Restore(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -172,14 +173,14 @@ func TestRestoreCutted(t *testing.T) {
 	storage := NewStorage()
 	text1 := "scheduler-snapshot v 1\n" +
 		"99:\"99 job\":0\n"
-	err := storage.Restore(strings.NewReader(text1))
+	err := storage.Restore(context.Background(), strings.NewReader(text1))
 	if err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 	text2 := "scheduler-snapshot v 1\n" +
 		"1:\"First job\":0\n" +
 		"2:\"Second"
-	err = storage.Restore(strings.NewReader(text2))
+	err = storage.Restore(context.Background(), strings.NewReader(text2))
 	if err == nil {
 		t.Fatalf("did not catch cutted snapshote while restore: %v", err)
 	}
@@ -219,7 +220,7 @@ func TestRestoreChunk(t *testing.T) {
 	text := "scheduler-snapshot v 1\n" +
 		"99:\"99 job\":0\n"
 	reader := &chunkReader{data: []byte(text)}
-	err := storage.Restore(reader)
+	err := storage.Restore(context.Background(), reader)
 	if err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -284,12 +285,12 @@ func TestTransferSnapshot_Success(t *testing.T) {
 
 	var dst bytes.Buffer
 
-	snapshot := func(w io.Writer) error {
+	snapshot := func(ctx context.Context, w io.Writer) error {
 		_, err := io.WriteString(w, want)
 		return err
 	}
 
-	err := transferSnapshot(snapshot, testSink{writer: &dst})
+	err := transferSnapshot(context.Background(), snapshot, testSink{writer: &dst})
 	if err != nil {
 		t.Fatalf("transferSnapshot() error = %v", err)
 	}
@@ -335,7 +336,7 @@ func TestTransferSnapshot_SlowSink(t *testing.T) {
 	exportFinished := make(chan struct{})
 	done := make(chan error, 1)
 
-	snapshot := func(w io.Writer) error {
+	snapshot := func(ctx context.Context, w io.Writer) error {
 		defer close(exportFinished)
 
 		_, err := io.WriteString(w, strings.Repeat("x", 1<<20))
@@ -343,7 +344,7 @@ func TestTransferSnapshot_SlowSink(t *testing.T) {
 	}
 
 	go func() {
-		done <- transferSnapshot(snapshot, testSink{writer: sw})
+		done <- transferSnapshot(context.Background(), snapshot, testSink{writer: sw})
 	}()
 
 	waitSignal(t, sw.started)
@@ -383,7 +384,7 @@ func TestTransferSnapshot_SlowSnapshot(t *testing.T) {
 
 	var dst bytes.Buffer
 
-	snapshot := func(w io.Writer) error {
+	snapshot := func(ctx context.Context, w io.Writer) error {
 		if _, err := io.WriteString(w, "first"); err != nil {
 			return err
 		}
@@ -396,7 +397,7 @@ func TestTransferSnapshot_SlowSnapshot(t *testing.T) {
 	}
 
 	go func() {
-		err := transferSnapshot(snapshot, testSink{writer: &dst})
+		err := transferSnapshot(context.Background(), snapshot, testSink{writer: &dst})
 		done <- err
 		close(transferFinished)
 	}()
@@ -426,7 +427,7 @@ func TestTransferSnapshot_ExportFailsMidStream(t *testing.T) {
 	errExport := errors.New("export failed")
 	var dst bytes.Buffer
 
-	snapshot := func(w io.Writer) error {
+	snapshot := func(ctx context.Context, w io.Writer) error {
 		if _, err := io.WriteString(w, "partial data"); err != nil {
 			return err
 		}
@@ -435,7 +436,7 @@ func TestTransferSnapshot_ExportFailsMidStream(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- transferSnapshot(snapshot, testSink{writer: &dst})
+		done <- transferSnapshot(context.Background(), snapshot, testSink{writer: &dst})
 	}()
 
 	err := waitResult(t, done)
