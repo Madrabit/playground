@@ -1,8 +1,11 @@
-package main
+package scheduler
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"playground/in-memory-scheduler/internal/domain"
+	"playground/in-memory-scheduler/internal/storage"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -17,23 +20,30 @@ type Metrics struct {
 	cancelled atomic.Uint64
 }
 
+type Queue interface {
+	Len() int
+	Push(id int) error
+	Pop() (int, bool)
+	Close()
+}
+
 type Scheduler struct {
 	normalQueue  Queue
 	highQueue    Queue
 	queueCounter int
-	admin        StoreAdmin
-	debug        StoreDebug
-	reader       StoreReader
-	writer       StoreWriter
+	admin        storage.StoreAdmin
+	debug        storage.StoreDebug
+	reader       storage.StoreReader
+	writer       storage.StoreWriter
 	/*
 		блокировка для сбора в мапу с разных воркеров activeWorkers
 		а также MoveJob и CloneJob для демонстрационного кода
 	*/
 	mu                sync.RWMutex
-	workers           []WorkerI
+	Workers           []WorkerI
 	stop              chan struct{}
 	roundRobin        uint64
-	results           []chan Results
+	Results           []chan Results
 	wg                sync.WaitGroup
 	validator         *Validator
 	validatorOnce     sync.Once
@@ -41,17 +51,19 @@ type Scheduler struct {
 	heartBeat         chan HeartBeat
 	cond              *sync.Cond
 	metrics           Metrics
-	storage           *Storage // для имитации бага прямой доступ в структуру
+	storage           *storage.Storage // для имитации бага прямой доступ в структуру
 	validationRequest chan ValidationRequest
-	mergedChan        chan Results
+	MergedChan        chan Results
 	goroutines        atomic.Int64
-	mergeWg           sync.WaitGroup
-	jobsWg            sync.WaitGroup
+	MergeWg           sync.WaitGroup
+	JobsWg            sync.WaitGroup
+
+	nextJobId atomic.Uint64
 }
 
 type Results struct {
 	JobID int
-	State JobStatus
+	State domain.JobStatus
 	Error error
 }
 
@@ -63,7 +75,7 @@ func NewScheduler(
 	results []chan Results,
 	heartBeat chan HeartBeat,
 ) *Scheduler {
-	storage := NewStorage()
+	storage := storage.NewStorage()
 	s := &Scheduler{
 		normalQueue:       normalQueue,
 		highQueue:         highQueue,
@@ -72,7 +84,7 @@ func NewScheduler(
 		reader:            storage,
 		writer:            storage,
 		stop:              make(chan struct{}),
-		results:           results,
+		Results:           results,
 		activeWorkers:     map[int]time.Time{},
 		heartBeat:         heartBeat,
 		mu:                sync.RWMutex{},
@@ -80,10 +92,22 @@ func NewScheduler(
 		validator:         validator,
 		validatorOnce:     sync.Once{},
 		validationRequest: validationRequest,
-		mergedChan:        make(chan Results, 1024),
+		MergedChan:        make(chan Results, 1024),
 	}
 	s.cond = sync.NewCond(&s.mu)
 	return s
+}
+
+type WorkerI interface {
+	Loop(ctx context.Context)
+	Process(ctx context.Context, j domain.Job) (domain.JobStatus, error)
+	Enqueue(job domain.Job)
+	CheckHealth(ctx context.Context)
+	Start(ctx context.Context)
+	IsBusy() bool
+	IsIdle() bool
+	IsStopped() bool
+	Stop()
 }
 
 /*
@@ -103,7 +127,7 @@ func (s *Scheduler) Start() {
 				return
 			case w := <-s.heartBeat:
 				s.mu.Lock()
-				s.activeWorkers[w.jobId] = w.LastSeen
+				s.activeWorkers[w.JobId] = w.LastSeen
 				s.mu.Unlock()
 			}
 		}
@@ -159,7 +183,8 @@ func (s *Scheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *Scheduler) Add(j Job) error {
+func (s *Scheduler) Add(j domain.Job) error {
+	j.ID = int(s.nextJobId.Add(1))
 	const maxPendingJobs = 100
 	var q Queue
 	if s.queueCounter < 5 {
@@ -170,11 +195,11 @@ func (s *Scheduler) Add(j Job) error {
 	//if q.Len() >= maxPendingJobs {
 	//	return ErrQueueFull
 	//}
-	err := q.Push(j.ID)
+	err := s.writer.Save(j)
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
 	}
-	err = s.writer.Save(j)
+	err = q.Push(j.ID)
 	if err != nil {
 		return fmt.Errorf("scheduler add job: %d %w", j.ID, err)
 	}
@@ -182,19 +207,19 @@ func (s *Scheduler) Add(j Job) error {
 	return nil
 }
 
-func (s *Scheduler) AddAndLog(j Job) error {
+func (s *Scheduler) AddAndLog(j domain.Job) error {
 	return s.Add(j)
 }
 
 type ValidationRequest struct {
 	JobID int
-	job   Job
+	job   domain.Job
 	reply chan ValidationResult
 }
 
 type ValidationResult struct {
 	JobID int
-	job   Job
+	job   domain.Job
 	Err   error
 }
 
@@ -237,19 +262,19 @@ func (s *Scheduler) DispatchLoop() {
 			fmt.Errorf("scheduler handle validation result job: %d %w", result.JobID, result.Err)
 		}
 		worker := s.pickWorker()
-		s.jobsWg.Add(1)
+		s.JobsWg.Add(1)
 		worker.Enqueue(result.job)
 	}
 }
 
 func (s *Scheduler) MergeResults() {
 
-	for _, ch := range s.results {
-		s.mergeWg.Add(1)
+	for _, ch := range s.Results {
+		s.MergeWg.Add(1)
 		go func(ch chan Results) {
-			defer s.mergeWg.Done()
+			defer s.MergeWg.Done()
 			for result := range ch {
-				s.mergedChan <- result
+				s.MergedChan <- result
 			}
 		}(ch)
 	}
@@ -260,7 +285,7 @@ func (s *Scheduler) HandleMergedResults() {
 		select {
 		case <-s.stop:
 			return
-		case result, ok := <-s.mergedChan:
+		case result, ok := <-s.MergedChan:
 			if !ok {
 				return
 			}
@@ -286,7 +311,7 @@ func (s *Scheduler) handleResults(result Results) {
 		return
 	}
 	if result.Error != nil {
-		job.State = Failed
+		job.State = domain.Failed
 		s.metrics.failed.Add(1)
 	} else {
 		job.State = result.State
@@ -301,7 +326,7 @@ func (s *Scheduler) handleResults(result Results) {
 
 func (s *Scheduler) pickWorker() WorkerI {
 	i := atomic.AddUint64(&s.roundRobin, 1)
-	return s.workers[i%uint64(len(s.workers))]
+	return s.Workers[i%uint64(len(s.Workers))]
 }
 
 func (s *Scheduler) ProcessBatch(ids []int) []error {
@@ -397,7 +422,7 @@ func (s *Scheduler) RemoveCancelled() {
 	for _, id := range jobs {
 		job, err := s.reader.GetByID(id)
 		if err == nil {
-			if job.State == Cancelled {
+			if job.State == domain.Cancelled {
 				s.writer.RemoveByID(job.ID)
 			}
 		}
@@ -410,7 +435,7 @@ func (s *Scheduler) CollectRunningJobs() []int {
 	for _, id := range jobs {
 		job, err := s.reader.GetByID(id)
 		if err == nil {
-			if job.State != Running {
+			if job.State != domain.Running {
 				continue
 			}
 			ids = append(ids, id)
@@ -419,10 +444,10 @@ func (s *Scheduler) CollectRunningJobs() []int {
 	return ids
 }
 
-func (s *Scheduler) GetById(ID int) (Job, error) {
+func (s *Scheduler) GetById(ID int) (domain.Job, error) {
 	job, err := s.reader.GetByID(ID)
 	if err != nil {
-		return Job{}, fmt.Errorf("scheduler GetById: jobID %d %w", ID, err)
+		return domain.Job{}, fmt.Errorf("scheduler GetById: jobID %d %w", ID, err)
 	}
 	return job, nil
 }
@@ -438,9 +463,9 @@ func (s *Scheduler) ActiveWorkers() []int {
 }
 
 type SchedulerStats struct {
-	Done      uint
-	Failed    uint
-	Cancelled uint
+	Done      uint `json:"done"`
+	Failed    uint `json:"failed"`
+	Cancelled uint `json:"cancelled"`
 }
 
 func (s *Scheduler) Stats() SchedulerStats {
@@ -453,16 +478,21 @@ func (s *Scheduler) Stats() SchedulerStats {
 
 func (s *Scheduler) MoveJob() {
 	s.mu.Lock()
-	s.storage.mu.Lock()
+	s.storage.Mu.Lock()
 	fmt.Println("move job")
-	s.storage.mu.Unlock()
+	s.storage.Mu.Unlock()
 	s.mu.Unlock()
 }
 
 func (s *Scheduler) CloneJob() {
 	s.mu.Lock()
-	s.storage.mu.Lock()
+	s.storage.Mu.Lock()
 	fmt.Println("move job")
-	s.storage.mu.Unlock()
+	s.storage.Mu.Unlock()
 	s.mu.Unlock()
+}
+
+type HeartBeat struct {
+	JobId    int
+	LastSeen time.Time
 }

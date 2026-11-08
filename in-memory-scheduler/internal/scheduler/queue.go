@@ -1,7 +1,8 @@
-package main
+package scheduler
 
 import (
 	"errors"
+	"playground/in-memory-scheduler/internal/domain"
 	"sync"
 )
 
@@ -19,10 +20,10 @@ type JobsQueue struct {
 }
 
 func NewJobsQueue() *JobsQueue {
-	ids := make([]int, maxJobs)
+	ids := make([]int, domain.MaxJobs)
 	q := &JobsQueue{
 		ids:      ids,
-		capacity: maxJobs,
+		capacity: domain.MaxJobs,
 		mu:       sync.Mutex{}}
 	q.cond = sync.NewCond(&q.mu)
 	return q

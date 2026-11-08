@@ -1,7 +1,8 @@
-package main
+package scheduler
 
 import (
 	"fmt"
+	"playground/in-memory-scheduler/internal/domain"
 	"strings"
 	"unicode/utf8"
 )
@@ -38,7 +39,7 @@ func (v *Validator) Stop() {
 	close(v.stop)
 }
 
-func (v *Validator) validateJob(j Job) error {
+func (v *Validator) validateJob(j domain.Job) error {
 	if j.ID <= 0 {
 		return &ValidationError{
 			Field:  "ID",

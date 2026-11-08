@@ -1,7 +1,9 @@
-package main
+package scheduler
 
 import (
 	"context"
+	"playground/in-memory-scheduler/internal/domain"
+	"playground/in-memory-scheduler/internal/storage"
 	"testing"
 	"time"
 )
@@ -21,8 +23,8 @@ func TestIntegration_SchedulerEndToEnd(t *testing.T) {
 	normalQueue := NewJobsQueue()
 
 	// --- Storage (in-memory) ---
-	storage := NewStorage() // твой реальный in-memory storage
-	job := Job{ID: 1, Name: "TestJob"}
+	storage := storage.NewStorage() // твой реальный in-memory storage
+	job := domain.Job{ID: 1, Name: "TestJob"}
 	err := storage.Save(job)
 	if err != nil {
 		return
@@ -40,7 +42,7 @@ func TestIntegration_SchedulerEndToEnd(t *testing.T) {
 		heartBeat,
 	)
 	// --- Worker ---
-	worker := NewWorker(1, results[0], processor, heartBeat, &scheduler.jobsWg)
+	worker := NewWorker(1, results[0], processor, heartBeat, &scheduler.JobsWg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	worker.Start(ctx)
@@ -48,7 +50,7 @@ func TestIntegration_SchedulerEndToEnd(t *testing.T) {
 	// --- Scheduler ---
 
 	scheduler.reader = storage
-	scheduler.workers = []WorkerI{worker}
+	scheduler.Workers = []WorkerI{worker}
 
 	go scheduler.DispatchLoop()
 
@@ -62,7 +64,7 @@ func TestIntegration_SchedulerEndToEnd(t *testing.T) {
 			t.Fatalf("expected job ID=1, got %d", res.JobID)
 		}
 		// FakeProcessor возвращает Failed
-		if res.State != Failed {
+		if res.State != domain.Failed {
 			t.Fatalf("expected Failed, got %v", res.State)
 		}
 	case <-time.After(3 * time.Second):
@@ -83,8 +85,8 @@ func TestMergeResults(t *testing.T) {
 	merged := make(chan Results, 2)
 
 	s := &Scheduler{
-		results:    []chan Results{ch1, ch2},
-		mergedChan: merged,
+		Results:    []chan Results{ch1, ch2},
+		MergedChan: merged,
 	}
 
 	// запускаем merge
@@ -126,8 +128,8 @@ func TestPanicProcessor(t *testing.T) {
 	highQueue := NewJobsQueue()
 	normalQueue := NewJobsQueue()
 
-	storage := NewStorage()
-	job := Job{ID: 1, Name: "TestJob"}
+	storage := storage.NewStorage()
+	job := domain.Job{ID: 1, Name: "TestJob"}
 	err := storage.Save(job)
 	if err != nil {
 		return
@@ -145,7 +147,7 @@ func TestPanicProcessor(t *testing.T) {
 		heartBeat,
 	)
 	// --- Worker ---
-	worker := NewWorker(1, results[0], processor, heartBeat, &scheduler.jobsWg)
+	worker := NewWorker(1, results[0], processor, heartBeat, &scheduler.JobsWg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	worker.Start(ctx)
@@ -153,7 +155,7 @@ func TestPanicProcessor(t *testing.T) {
 	// --- Scheduler ---
 
 	scheduler.reader = storage
-	scheduler.workers = []WorkerI{worker}
+	scheduler.Workers = []WorkerI{worker}
 
 	go scheduler.DispatchLoop()
 
@@ -167,7 +169,7 @@ func TestPanicProcessor(t *testing.T) {
 			t.Fatalf("expected job ID=1, got %d", res.JobID)
 		}
 		// FakeProcessor возвращает Failed
-		if res.State != Failed {
+		if res.State != domain.Failed {
 			t.Fatalf("expected Failed, got %v", res.State)
 		}
 	case <-time.After(3 * time.Second):

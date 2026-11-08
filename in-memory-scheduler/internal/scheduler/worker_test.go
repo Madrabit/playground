@@ -1,8 +1,9 @@
-package main
+package scheduler
 
 import (
 	"context"
 	"fmt"
+	"playground/in-memory-scheduler/internal/domain"
 	"sync"
 	"testing"
 	"time"
@@ -14,15 +15,15 @@ func NewFakeProcessor() Processor {
 	return &FakeProcessor{}
 }
 
-func (f FakeProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
+func (f FakeProcessor) Process(ctx context.Context, job domain.Job) (domain.JobStatus, error) {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return Cancelled, nil
+		return domain.Cancelled, nil
 	case <-timer.C:
 		fmt.Printf("Proccess ID: %d", job.ID)
-		return Failed, fmt.Errorf("job: %d failed %w", job.ID, ErrFailedProcess)
+		return domain.Failed, fmt.Errorf("job: %d failed %w", job.ID, ErrFailedProcess)
 	}
 }
 
@@ -40,7 +41,7 @@ func TestWorkerProcessesJob(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	worker.Start(ctx)
-	job := Job{
+	job := domain.Job{
 		ID:   1,
 		Name: "Test",
 	}
@@ -51,7 +52,7 @@ func TestWorkerProcessesJob(t *testing.T) {
 		if res.JobID != 1 {
 			t.Fatalf("expected JobID=1, got %d", res.JobID)
 		}
-		if res.State != Failed { // FakeProcessor всегда возвращает Failed по таймеру
+		if res.State != domain.Failed { // FakeProcessor всегда возвращает Failed по таймеру
 			t.Fatalf("expected status Failed, got %v", res.State)
 		}
 	case <-time.After(2 * time.Second):
@@ -71,7 +72,7 @@ func TestWorkerCancelsJob(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)
 
-	job := Job{ID: 1}
+	job := domain.Job{ID: 1}
 	wg.Add(1)
 	worker.Enqueue(job)
 
@@ -80,7 +81,7 @@ func TestWorkerCancelsJob(t *testing.T) {
 
 	select {
 	case res := <-results:
-		if res.State != Cancelled {
+		if res.State != domain.Cancelled {
 			t.Fatalf("expected Cancelled, got %v", res.State)
 		}
 	case <-time.After(500 * time.Millisecond):

@@ -1,13 +1,14 @@
-package main
+package scheduler
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"playground/in-memory-scheduler/internal/domain"
 )
 
 func LoggingMiddleware(next Processor) Processor {
-	return ProcessFunc(func(ctx context.Context, job Job) (JobStatus, error) {
+	return ProcessFunc(func(ctx context.Context, job domain.Job) (domain.JobStatus, error) {
 		fmt.Println("logging before")
 		jobStatus, err := next.Process(ctx, job)
 		fmt.Println("logging after")
@@ -29,8 +30,8 @@ func (e RetryableError) Unwrap() error {
 
 func RetryMiddleware(attempts int) Middleware {
 	return func(next Processor) Processor {
-		return ProcessFunc(func(ctx context.Context, job Job) (JobStatus, error) {
-			var state JobStatus
+		return ProcessFunc(func(ctx context.Context, job domain.Job) (domain.JobStatus, error) {
+			var state domain.JobStatus
 			var err error
 			var retryErr *RetryableError
 			for i := 0; i < attempts; i++ {

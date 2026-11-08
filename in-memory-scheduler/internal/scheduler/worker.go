@@ -1,10 +1,11 @@
-package main
+package scheduler
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"log"
+	"playground/in-memory-scheduler/internal/domain"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,7 +20,7 @@ const (
 type Worker struct {
 	ID        int
 	stop      chan struct{}
-	jobs      chan Job
+	jobs      chan domain.Job
 	results   chan<- Results
 	processor Processor
 	heartBeat chan<- HeartBeat
@@ -29,14 +30,14 @@ type Worker struct {
 }
 
 type Processor interface {
-	Process(ctx context.Context, job Job) (JobStatus, error)
+	Process(ctx context.Context, job domain.Job) (domain.JobStatus, error)
 }
 
 func NewWorker(ID int, results chan Results, processor Processor, heartBeat chan<- HeartBeat, wg *sync.WaitGroup) *Worker {
 	return &Worker{
 		ID:        ID,
 		stop:      make(chan struct{}),
-		jobs:      make(chan Job),
+		jobs:      make(chan domain.Job),
 		results:   results,
 		processor: processor,
 		heartBeat: heartBeat,
@@ -70,7 +71,7 @@ func (w *Worker) Loop(ctx context.Context) {
 					if r := recover(); r != nil {
 						resChan <- Results{
 							JobID: job.ID,
-							State: Failed,
+							State: domain.Failed,
 							Error: fmt.Errorf("panic: %v", r),
 						}
 					}
@@ -100,7 +101,7 @@ func (w *Worker) Loop(ctx context.Context) {
 				default:
 					w.results <- Results{
 						job.ID,
-						Failed,
+						domain.Failed,
 						fmt.Errorf("timeout exceeded waiting for job %d", job.ID),
 					}
 					w.wg.Done()
@@ -113,14 +114,14 @@ func (w *Worker) Loop(ctx context.Context) {
 func normalizeResult(res Results) Results {
 	switch {
 	case errors.Is(res.Error, context.Canceled):
-		res.State = Cancelled
+		res.State = domain.Cancelled
 	// таймаут — ошибка SLA
 	case errors.Is(res.Error, context.DeadlineExceeded):
 		log.Println("timeout:", res.JobID)
-		res.State = Failed
+		res.State = domain.Failed
 	case res.Error != nil:
 		log.Println("processor error:", res.Error)
-		res.State = Failed
+		res.State = domain.Failed
 	}
 	return res
 }
@@ -137,7 +138,7 @@ func stopTime(t *time.Timer) {
 // Отмена процесса по таймауту 1 секунда
 //
 //go:noinline
-func (w *Worker) Process(ctx context.Context, j Job) (JobStatus, error) {
+func (w *Worker) Process(ctx context.Context, j domain.Job) (domain.JobStatus, error) {
 	const jobTimeout = time.Second * 1
 	jobCtx, cancel := context.WithTimeout(ctx, jobTimeout)
 	defer cancel()
@@ -145,10 +146,10 @@ func (w *Worker) Process(ctx context.Context, j Job) (JobStatus, error) {
 	return process, err
 }
 
-func (w *Worker) Enqueue(job Job) {
+func (w *Worker) Enqueue(job domain.Job) {
 	fmt.Println("Enqueue", job.ID)
 	newJob := job
-	newJob.State = Running
+	newJob.State = domain.Running
 	select {
 	case <-w.stop:
 		return

@@ -1,14 +1,15 @@
-package main
+package httpapi
 
 import (
 	"errors"
 )
 
 var (
-	ErrDuplicateJob      = errors.New("job already exists")
-	ErrJobNotFound       = errors.New("job not found")
-	ErrQueueFull         = errors.New("queue is full")
 	ErrInvalidTransition = errors.New("invalid transition")
+	ErrJobNotFound       = errors.New("job not found")
+	ErrDuplicateJob      = errors.New("job already exists")
+	ErrQueueFull         = errors.New("queue is full")
+	ErrValidation        = errors.New("validation error")
 	ErrFailedProcess     = errors.New("failed process")
 	ErrProcessNotFound   = errors.New("process not found")
 	ErrProcessAborted    = errors.New("process aborted")

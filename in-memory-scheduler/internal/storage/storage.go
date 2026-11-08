@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"bufio"
@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"playground/in-memory-scheduler/internal/domain"
 	"slices"
 	"sort"
 	"strconv"
@@ -22,14 +23,14 @@ type TagStore interface {
 }
 
 type StoreWriter interface {
-	Save(job Job) error
-	Update(job Job) error
+	Save(job domain.Job) error
+	Update(job domain.Job) error
 	Rename(id int, newName string) error
 	RemoveByID(id int)
 }
 
 type StoreReader interface {
-	GetByID(id int) (Job, error)
+	GetByID(id int) (domain.Job, error)
 	ListIDs() []int
 }
 
@@ -39,21 +40,21 @@ type StoreDebug interface {
 }
 
 type Storage struct {
-	jobs map[int]Job
+	jobs map[int]domain.Job
 	/*
 		для GetById из забора мапы jobs потому что шарятся данные
 	*/
-	mu sync.RWMutex
+	Mu sync.RWMutex
 }
 
 func NewStorage() *Storage {
-	jobs := make(map[int]Job, maxJobs)
+	jobs := make(map[int]domain.Job, domain.MaxJobs)
 	return &Storage{jobs, sync.RWMutex{}}
 }
 
-func (s *Storage) Save(job Job) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Storage) Save(job domain.Job) error {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
 	if _, ok := s.jobs[job.ID]; ok {
 		return ErrDuplicateJob
 	}
@@ -61,9 +62,9 @@ func (s *Storage) Save(job Job) error {
 	return nil
 }
 
-func (s *Storage) Update(job Job) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Storage) Update(job domain.Job) error {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
 	_, ok := s.jobs[job.ID]
 	if !ok {
 		return fmt.Errorf("job %d does not exist %w", job.ID, ErrJobNotFound)
@@ -73,8 +74,8 @@ func (s *Storage) Update(job Job) error {
 }
 
 func (s *Storage) Dump() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
 	var br strings.Builder
 	for _, j := range s.jobs {
 		br.WriteString(strconv.Itoa(j.ID))
@@ -85,19 +86,19 @@ func (s *Storage) Dump() string {
 	return br.String()
 }
 
-func (s *Storage) GetByID(id int) (Job, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s *Storage) GetByID(id int) (domain.Job, error) {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
 	job, ok := s.jobs[id]
 	if ok {
 		return job.Clone(), nil
 	}
-	return Job{}, ErrJobNotFound
+	return domain.Job{}, ErrJobNotFound
 }
 
 func (s *Storage) ListIDs() []int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
 	ids := make([]int, 0, len(s.jobs))
 	for id := range s.jobs {
 		ids = append(ids, id)
@@ -106,14 +107,14 @@ func (s *Storage) ListIDs() []int {
 }
 
 func (s *Storage) Reset() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.jobs = make(map[int]Job)
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	s.jobs = make(map[int]domain.Job)
 }
 
 func (s *Storage) Rename(id int, newName string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
 	job, ok := s.jobs[id]
 	if !ok {
 		return fmt.Errorf("no such job by id: %w", ErrJobNotFound)
@@ -124,14 +125,14 @@ func (s *Storage) Rename(id int, newName string) error {
 }
 
 func (s *Storage) RemoveByID(id int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
 	delete(s.jobs, id)
 }
 
 func (s *Storage) DumpTags() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
 	tags := make([]string, 0, len(s.jobs))
 	dedupe := make(map[string]struct{})
 	for _, v := range s.jobs {
@@ -147,8 +148,8 @@ func (s *Storage) DumpTags() string {
 }
 
 func (s *Storage) AddTag(id int, tag string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
 	job, ok := s.jobs[id]
 	if ok {
 		job.Tags[tag] = struct{}{}
@@ -162,7 +163,7 @@ func (s *Storage) Snapshot(ctx context.Context, w io.Writer) error {
 		Name  string
 		State int
 	}
-	s.mu.RLock()
+	s.Mu.RLock()
 
 	ids := make([]int, 0, len(s.jobs))
 	for k := range s.jobs {
@@ -178,7 +179,7 @@ func (s *Storage) Snapshot(ctx context.Context, w io.Writer) error {
 			State: int(j.State),
 		})
 	}
-	s.mu.RUnlock()
+	s.Mu.RUnlock()
 	version := 0
 	if _, err := fmt.Fprintln(w, "scheduler-snapshot v "+strconv.Itoa(version+1)); err != nil {
 		return fmt.Errorf("scheduler-snapshot v: %w", err)
@@ -216,7 +217,7 @@ func (r *storageReader) Read(p []byte) (int, error) {
 
 func (s *Storage) Restore(ctx context.Context, r io.Reader) error {
 	scanner := bufio.NewScanner(r)
-	jobs := make(map[int]Job)
+	jobs := make(map[int]domain.Job)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("restore header: %w", err)
@@ -255,22 +256,22 @@ func (s *Storage) Restore(ctx context.Context, r io.Reader) error {
 		if err != nil {
 			return fmt.Errorf("error while parsing state: %w", err)
 		}
-		if state < int(Pending) || state > int(Stopped) {
+		if state < int(domain.Pending) || state > int(domain.Stopped) {
 			return fmt.Errorf("invalid state: %d", state)
 		}
-		job := Job{
+		job := domain.Job{
 			ID:    id,
 			Name:  name,
-			State: JobStatus(state),
+			State: domain.JobStatus(state),
 		}
 		jobs[job.ID] = job
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("restore scanner error %w", err)
 	}
-	s.mu.Lock()
+	s.Mu.Lock()
 	s.jobs = jobs
-	s.mu.Unlock()
+	s.Mu.Unlock()
 	return nil
 }
 

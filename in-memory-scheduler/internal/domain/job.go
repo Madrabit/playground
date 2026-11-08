@@ -1,4 +1,4 @@
-package main
+package domain
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"slices"
 )
 
-const maxJobs = 1000
+const MaxJobs = 1000
 
 type Metadata struct {
 	CreatedAt int64
@@ -16,7 +16,7 @@ type Metadata struct {
 type Job struct {
 	ID          int                 // 8
 	Complexity  int                 // 8
-	Name        string              `json:"name"` // 16
+	Name        string              // 16
 	Description string              // 16
 	Tags        map[string]struct{} // 16
 	SomeSlice   []string

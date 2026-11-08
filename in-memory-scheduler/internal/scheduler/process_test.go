@@ -1,14 +1,15 @@
-package main
+package scheduler
 
 import (
 	"context"
+	"playground/in-memory-scheduler/internal/domain"
 	"testing"
 )
 
 func Benchmark_Interface(b *testing.B) {
 	var p Processor = &PrintProcessor{}
 
-	job := Job{ID: 1}
+	job := domain.Job{ID: 1}
 
 	b.ResetTimer()
 	ctx, _ := context.WithCancel(context.Background())
@@ -20,7 +21,7 @@ func Benchmark_Interface(b *testing.B) {
 func Benchmark_DirectCall(b *testing.B) {
 	var p PrintProcessor = PrintProcessor{}
 
-	job := Job{ID: 1}
+	job := domain.Job{ID: 1}
 	ctx, _ := context.WithCancel(context.Background())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

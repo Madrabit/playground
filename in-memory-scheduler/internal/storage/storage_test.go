@@ -1,10 +1,11 @@
-package main
+package storage
 
 import (
 	"bytes"
 	"context"
 	"errors"
 	"io"
+	"playground/in-memory-scheduler/internal/domain"
 	"strings"
 	"sync"
 	"testing"
@@ -13,10 +14,10 @@ import (
 
 func TestSnapshotWriter(t *testing.T) {
 	storage := NewStorage()
-	jobs := []Job{
-		{ID: 3, Name: "Third job", State: Failed},
-		{ID: 1, Name: "First job", State: Pending},
-		{ID: 2, Name: "Second job", State: Running},
+	jobs := []domain.Job{
+		{ID: 3, Name: "Third job", State: domain.Failed},
+		{ID: 1, Name: "First job", State: domain.Pending},
+		{ID: 2, Name: "Second job", State: domain.Running},
 	}
 	err := storage.Save(jobs[0])
 	if err != nil {
@@ -45,10 +46,10 @@ func TestSnapshotWriter(t *testing.T) {
 
 func TestSnapshotWriterCutted(t *testing.T) {
 	storage := NewStorage()
-	jobs := []Job{
-		{ID: 3, Name: "Third job", State: Failed},
-		{ID: 1, Name: "First job", State: Pending},
-		{ID: 2, Name: "Second job", State: Running},
+	jobs := []domain.Job{
+		{ID: 3, Name: "Third job", State: domain.Failed},
+		{ID: 1, Name: "First job", State: domain.Pending},
+		{ID: 2, Name: "Second job", State: domain.Running},
 	}
 	err := storage.Save(jobs[0])
 	if err != nil {
@@ -90,10 +91,10 @@ func (s *failingWriter) Write(p []byte) (int, error) {
 
 func TestSnapshotWriterCorrupted(t *testing.T) {
 	storage := NewStorage()
-	jobs := []Job{
-		{ID: 3, Name: "Third job", State: Failed},
-		{ID: 1, Name: "First job", State: Pending},
-		{ID: 2, Name: "Second job", State: Running},
+	jobs := []domain.Job{
+		{ID: 3, Name: "Third job", State: domain.Failed},
+		{ID: 1, Name: "First job", State: domain.Pending},
+		{ID: 2, Name: "Second job", State: domain.Running},
 	}
 	err := storage.Save(jobs[0])
 	if err != nil {
@@ -119,10 +120,10 @@ func TestSnapshotWriterCorrupted(t *testing.T) {
 
 func TestRestoreSuccess(t *testing.T) {
 	storage := NewStorage()
-	jobs := []Job{
-		{ID: 1, Name: "First job", State: Pending},
-		{ID: 2, Name: "Second job", State: Running},
-		{ID: 3, Name: "Third job", State: Failed},
+	jobs := []domain.Job{
+		{ID: 1, Name: "First job", State: domain.Pending},
+		{ID: 2, Name: "Second job", State: domain.Running},
+		{ID: 3, Name: "Third job", State: domain.Failed},
 	}
 	err := storage.Save(jobs[0])
 	if err != nil {
@@ -141,7 +142,7 @@ func TestRestoreSuccess(t *testing.T) {
 		t.Fatalf("snapshot: %v", err)
 	}
 	secondStorage := NewStorage()
-	err = secondStorage.Save(Job{ID: 99, Name: "99 job", State: Failed})
+	err = secondStorage.Save(domain.Job{ID: 99, Name: "99 job", State: domain.Failed})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -193,8 +194,8 @@ func TestRestoreCutted(t *testing.T) {
 	if storage.jobs[99].Name != "99 job" {
 		t.Fatalf("expected job Name %s, got %s", "99 job", storage.jobs[99].Name)
 	}
-	if storage.jobs[99].State != Pending {
-		t.Fatalf("expected job State %d, got %d", Pending, storage.jobs[99].State)
+	if storage.jobs[99].State != domain.Pending {
+		t.Fatalf("expected job State %d, got %d", domain.Pending, storage.jobs[99].State)
 	}
 }
 
@@ -233,8 +234,8 @@ func TestRestoreChunk(t *testing.T) {
 	if storage.jobs[99].Name != "99 job" {
 		t.Fatalf("expected job Name %s, got %s", "99 job", storage.jobs[99].Name)
 	}
-	if storage.jobs[99].State != Pending {
-		t.Fatalf("expected job State %d, got %d", Pending, storage.jobs[99].State)
+	if storage.jobs[99].State != domain.Pending {
+		t.Fatalf("expected job State %d, got %d", domain.Pending, storage.jobs[99].State)
 	}
 }
 

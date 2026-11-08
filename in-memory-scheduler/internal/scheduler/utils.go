@@ -1,4 +1,4 @@
-package main
+package scheduler
 
 import (
 	"fmt"
@@ -18,7 +18,7 @@ func NameLength(name string) int {
 	return utf8.RuneCountInString(name)
 }
 
-func dumpStacks() {
+func DumpStacks() {
 	buf := make([]byte, 1<<20)
 	n := runtime.Stack(buf, true)
 	fmt.Printf("=== goroutine dump ===\n%s\n", buf[:n])

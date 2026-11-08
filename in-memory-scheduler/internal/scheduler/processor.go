@@ -1,8 +1,9 @@
-package main
+package scheduler
 
 import (
 	"context"
 	"fmt"
+	"playground/in-memory-scheduler/internal/domain"
 	"time"
 )
 
@@ -12,19 +13,19 @@ func NewPrintProcessor() Processor {
 	return &PrintProcessor{}
 }
 
-func (print *PrintProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
+func (print *PrintProcessor) Process(ctx context.Context, job domain.Job) (domain.JobStatus, error) {
 	//fmt.Printf("pid:%d", job.ID)
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return Cancelled, nil
+		return domain.Cancelled, nil
 	case <-timer.C:
 		x := job.ID + 1
 		if x%10 == 0 {
-			return Done, nil
+			return domain.Done, nil
 		}
-		return Pending, nil
+		return domain.Pending, nil
 	}
 }
 
@@ -36,14 +37,14 @@ func NewSleepProcessor() Processor {
 	return &SleepProcessor{}
 }
 
-func (p *SleepProcessor) Process(ctx context.Context, _ Job) (JobStatus, error) {
+func (p *SleepProcessor) Process(ctx context.Context, _ domain.Job) (domain.JobStatus, error) {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return Cancelled, nil
+		return domain.Cancelled, nil
 	case <-timer.C:
-		return Pending, nil
+		return domain.Pending, nil
 	}
 }
 
@@ -51,15 +52,15 @@ type FailProcessor struct{}
 
 func NewFailProcessor() Processor { return &FailProcessor{} }
 
-func (p *FailProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
+func (p *FailProcessor) Process(ctx context.Context, job domain.Job) (domain.JobStatus, error) {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return Cancelled, nil
+		return domain.Cancelled, nil
 	case <-timer.C:
 		fmt.Printf("Proccess ID: %d", job.ID)
-		return Failed, fmt.Errorf("job: %d failed %w", job.ID, ErrFailedProcess)
+		return domain.Failed, fmt.Errorf("job: %d failed %w", job.ID, ErrFailedProcess)
 	}
 }
 
@@ -69,23 +70,23 @@ func NewLongProcessor() Processor {
 	return &LongProcessor{}
 }
 
-func (p *LongProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
+func (p *LongProcessor) Process(ctx context.Context, job domain.Job) (domain.JobStatus, error) {
 	fmt.Println("long process started")
 	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		fmt.Println("cancelled long process")
-		return Cancelled, nil
+		return domain.Cancelled, nil
 	case <-timer.C:
 		fmt.Printf("Long Proccess ID: %d", job.ID)
-		return Pending, nil
+		return domain.Pending, nil
 	}
 }
 
-type ProcessFunc func(ctx context.Context, job Job) (JobStatus, error)
+type ProcessFunc func(ctx context.Context, job domain.Job) (domain.JobStatus, error)
 
-func (f ProcessFunc) Process(ctx context.Context, job Job) (JobStatus, error) {
+func (f ProcessFunc) Process(ctx context.Context, job domain.Job) (domain.JobStatus, error) {
 	return f(ctx, job)
 }
 
@@ -125,9 +126,9 @@ func NewHangingProcessor() Processor {
 	return &HangingProcessor{stop: make(chan struct{})}
 }
 
-func (h *HangingProcessor) Process(ctx context.Context, job Job) (JobStatus, error) {
+func (h *HangingProcessor) Process(ctx context.Context, job domain.Job) (domain.JobStatus, error) {
 	<-ctx.Done()
-	return Cancelled, nil
+	return domain.Cancelled, nil
 }
 
 type CanceledProcessor struct {
@@ -137,13 +138,13 @@ func NewCanceledProcessor() Processor {
 	return &CanceledProcessor{}
 }
 
-func (p *CanceledProcessor) Process(ctx context.Context, _ Job) (JobStatus, error) {
+func (p *CanceledProcessor) Process(ctx context.Context, _ domain.Job) (domain.JobStatus, error) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return Cancelled, nil
+			return domain.Cancelled, nil
 		case <-ticker.C:
 		}
 	}
@@ -157,7 +158,7 @@ func NewNotCanceledProcessor() Processor {
 	return &NotCanceledProcessor{}
 }
 
-func (p *NotCanceledProcessor) Process(ctx context.Context, _ Job) (JobStatus, error) {
+func (p *NotCanceledProcessor) Process(ctx context.Context, _ domain.Job) (domain.JobStatus, error) {
 	for {
 		time.Sleep(1 * time.Second)
 	}
@@ -170,6 +171,6 @@ func NewPanicProcessor() Processor {
 	return &PanicProcessor{}
 }
 
-func (p *PanicProcessor) Process(ctx context.Context, _ Job) (JobStatus, error) {
+func (p *PanicProcessor) Process(ctx context.Context, _ domain.Job) (domain.JobStatus, error) {
 	panic("boom")
 }
