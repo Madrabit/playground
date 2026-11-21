@@ -1,10 +1,14 @@
 package httpdto
 
 // CreateJobRequest — входящий запрос на создание задачи.
+// Name и Description — значения: отсутствие и пустая строка имеют одинаковый смысл.
+// Complexity — указатель: nil (отсутствие/null) отличается от явно переданного 0.
+// omitempty при отправке запроса опускает nil, но сохраняет указатель на 0.
+// ID, State и внутренние поля Job не принимаются от клиента.
 type CreateJobRequest struct {
 	Name        string              `json:"name"`
 	Description string              `json:"description"`
-	Complexity  *int                `json:"complexity"`
+	Complexity  *int                `json:"complexity,omitempty"`
 	Attrs       map[string]string   `json:"attrs"`
 	Tags        map[string]struct{} `json:"tags"`
 }
@@ -16,6 +20,8 @@ type CreateJobResponse struct {
 }
 
 // JobResponse — публичное представление задачи.
+// Все поля присутствуют даже при zero value; пустые Attrs и Tags передаются как {}.
+// State — строковая запись номера состояния, сохранённая для совместимости API.
 type JobResponse struct {
 	ID          int                 `json:"id"`
 	Name        string              `json:"name"`
@@ -32,6 +38,7 @@ type ErrorResponse struct {
 }
 
 // StatsResponse — публичное представление статистики.
+// Нулевые счётчики передаются явно, поэтому omitempty не используется.
 type StatsResponse struct {
 	Done      uint `json:"done"`
 	Failed    uint `json:"failed"`

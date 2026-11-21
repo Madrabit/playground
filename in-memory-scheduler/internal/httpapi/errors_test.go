@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"playground/in-memory-scheduler/internal/domain"
+	"playground/in-memory-scheduler/internal/httpdto"
 	"playground/in-memory-scheduler/internal/scheduler"
 )
 
@@ -120,11 +122,15 @@ func TestHTTPErrorStatuses(t *testing.T) {
 			}
 
 			wantBody := http.StatusText(tt.wantStatus)
-
-			if strings.TrimSpace(rec.Body.String()) != wantBody {
+			assertJSONResponse(t, rec, fmt.Sprintf(`{"error":%q}`, wantBody))
+			var got httpdto.ErrorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if got.Error != wantBody {
 				t.Errorf(
-					"body = %q, want %q",
-					rec.Body.String(),
+					"error = %q, want %q",
+					got.Error,
 					wantBody,
 				)
 			}

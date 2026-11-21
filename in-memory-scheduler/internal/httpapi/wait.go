@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -14,15 +13,14 @@ import (
 func (j *JobHandler) handleWaitJob(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil || id <= 0 {
-		http.Error(w, "invalid job id", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid job id")
 		return
 	}
 
 	// Запоминаем состояние задачи на момент начала запроса.
 	initial, err := j.scheduler.GetById(id)
 	if err != nil {
-		status := ToHTTPStatus(err)
-		http.Error(w, http.StatusText(status), status)
+		writeSchedulerError(w, err)
 		return
 	}
 
@@ -45,20 +43,12 @@ func (j *JobHandler) handleWaitJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		status := ToHTTPStatus(err)
-		http.Error(w, http.StatusText(status), status)
+		writeSchedulerError(w, err)
 		return
 	}
 
-	data, err := json.Marshal(updated)
-	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	// wait endpoint использует тот же публичный DTO задачи.
+	writeJSON(w, http.StatusOK, toJobResponse(updated))
 }
 
 // Это функция, которая действительно выполняет ожидание.

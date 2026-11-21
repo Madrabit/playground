@@ -1,3 +1,27 @@
+<!-- ИЗМЕНЕНО В ЗАДАЧЕ 28.1: описание публичного JSON-контракта. -->
+## HTTP DTO
+
+JSON-контракт определён в `internal/httpdto`; HTTP-обработчики явно преобразуют
+запросы в `domain.Job`, а модели задач и статистику — в DTO ответов.
+`domain.Job` не сериализуется в HTTP напрямую. Внутреннее поле `SomeSlice`
+не принимается в запросе и не возвращается в ответе; `id` и `state` задаёт сервер.
+Неизвестные поля запроса отклоняются с HTTP 400.
+
+- `POST /jobs`: `name`, `description`, `complexity`, `attrs`, `tags`.
+  `complexity` имеет тип `*int`: отсутствие или `null` дают HTTP 422,
+  явный `0` передаётся планировщику как значение. Проверка диапазона 1–10
+  остаётся обязанностью доменного валидатора.
+  `name` и `description` имеют тип `string`: отсутствие и пустая строка
+  равнозначны при создании. Для них `*string` не нужен.
+  Ответ: `{"name":"example"}`; `Scheduler.Add` пока не возвращает ID.
+- Ответ задачи: `id`, `name`, `description`, `complexity`, `attrs`, `tags`,
+  `state`. `attrs` и `tags` — JSON-объекты, пустые коллекции возвращаются как `{}`.
+  Совместимый формат `state` — строковое число: `"0"` pending, `"1"` running,
+  `"2"` failed, `"3"` done, `"4"` cancelled, `"5"` stopped.
+- Ошибки обработчиков и middleware: `{"error":"message"}`.
+- `GET /stats`: `{"done":0,"failed":0,"cancelled":0}`.
+  Поля ответов — значения без `omitempty`: нули и пустые строки не исчезают.
+
 Ownership of chans
 
 type Validator struct {

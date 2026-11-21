@@ -1,10 +1,10 @@
 package httpapi
 
 import (
-	"fmt"
-	"playground/in-memory-scheduler/internal/httpdto"
+	"strconv"
 
 	"playground/in-memory-scheduler/internal/domain"
+	"playground/in-memory-scheduler/internal/httpdto"
 )
 
 func toJobResponse(job domain.Job) httpdto.JobResponse {
@@ -25,6 +25,6 @@ func toJobResponse(job domain.Job) httpdto.JobResponse {
 		Complexity:  job.Complexity,
 		Attrs:       attrs,
 		Tags:        tags,
-		State:       fmt.Sprint(job.State),
+		State:       strconv.Itoa(int(job.State)),
 	}
 }

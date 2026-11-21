@@ -26,25 +26,10 @@ type Client struct {
 	httpClient *http.Client
 }
 
-type CreateJobRequest struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	Complexity  int                 `json:"complexity"`
-	Attrs       map[string]string   `json:"attrs"`
-	Tags        map[string]struct{} `json:"tags"`
-}
-
-// Ответ существующего POST /jobs.
-type CreateJobResponse struct {
-	Name string `json:"name"`
-}
-
-// Ответ существующего GET /stats.
-type StatsResponse struct {
-	Done      uint `json:"done"`
-	Failed    uint `json:"failed"`
-	Cancelled uint `json:"cancelled"`
-}
+// Клиент и сервер используют один HTTP-контракт.
+type CreateJobRequest = httpdto.CreateJobRequest
+type CreateJobResponse = httpdto.CreateJobResponse
+type StatsResponse = httpdto.StatsResponse
 
 type HTTPError struct {
 	StatusCode int

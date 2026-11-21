@@ -463,9 +463,9 @@ func (s *Scheduler) ActiveWorkers() []int {
 }
 
 type SchedulerStats struct {
-	Done      uint `json:"done"`
-	Failed    uint `json:"failed"`
-	Cancelled uint `json:"cancelled"`
+	Done      uint
+	Failed    uint
+	Cancelled uint
 }
 
 func (s *Scheduler) Stats() SchedulerStats {

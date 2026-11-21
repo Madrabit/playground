@@ -108,10 +108,10 @@ func Recovery(next http.Handler) http.Handler {
 					recovered,
 				)
 
-				http.Error(
+				writeJSONError(
 					w,
-					http.StatusText(http.StatusInternalServerError),
 					http.StatusInternalServerError,
+					http.StatusText(http.StatusInternalServerError),
 				)
 			}
 		}()
@@ -159,10 +159,10 @@ func ConcurrencyLimit(max int) HTTPMiddleware {
 				next.ServeHTTP(w, r)
 
 			default:
-				http.Error(
+				writeJSONError(
 					w,
-					http.StatusText(http.StatusServiceUnavailable),
 					http.StatusServiceUnavailable,
+					http.StatusText(http.StatusServiceUnavailable),
 				)
 			}
 		})

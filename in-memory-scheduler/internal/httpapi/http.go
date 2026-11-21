@@ -37,10 +37,10 @@ func NewHttpHandler(isReady func() bool, scheduler SchedulerAPI) http.Handler {
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if !isReady() {
-			http.Error(
+			writeJSONError(
 				w,
-				"not ready",
-				http.StatusServiceUnavailable)
+				http.StatusServiceUnavailable,
+				"not ready")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
