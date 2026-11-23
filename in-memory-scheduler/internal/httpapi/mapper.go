@@ -1,8 +1,6 @@
 package httpapi
 
 import (
-	"strconv"
-
 	"playground/in-memory-scheduler/internal/domain"
 	"playground/in-memory-scheduler/internal/httpdto"
 )
@@ -25,6 +23,6 @@ func toJobResponse(job domain.Job) httpdto.JobResponse {
 		Complexity:  job.Complexity,
 		Attrs:       attrs,
 		Tags:        tags,
-		State:       strconv.Itoa(int(job.State)),
+		State:       job.State.String(),
 	}
 }

@@ -56,3 +56,21 @@ func writeBodyError(w http.ResponseWriter, err error) {
 		"invalid JSON body",
 	)
 }
+
+// writeCreateJobDecodeError classifies decoder failures while keeping their
+// details out of the public response.
+func writeCreateJobDecodeError(w http.ResponseWriter, err error) {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		writeBodyError(w, err)
+		return
+	}
+
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		writeJSONError(w, http.StatusBadRequest, "invalid JSON field type")
+		return
+	}
+
+	writeBodyError(w, err)
+}

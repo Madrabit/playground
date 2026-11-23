@@ -68,6 +68,12 @@ func TestCreateJobBodyLimits(t *testing.T) {
 			wantCalls:  0,
 		},
 		{
+			name:       "wrong JSON field type",
+			body:       `{"name":42,"complexity":1}`,
+			wantStatus: http.StatusBadRequest,
+			wantCalls:  0,
+		},
+		{
 			name:       "valid body",
 			body:       `{"name":"test","complexity":1}`,
 			wantStatus: http.StatusCreated,
@@ -110,6 +116,10 @@ func TestCreateJobBodyLimits(t *testing.T) {
 					mock.addCalls,
 					tt.wantCalls,
 				)
+			}
+
+			if tt.name == "wrong JSON field type" {
+				assertJSONResponse(t, rec, `{"error":"invalid JSON field type"}`)
 			}
 		})
 	}

@@ -7,4 +7,5 @@ import (
 var (
 	ErrInvalidTransition = errors.New("invalid transition")
 	ErrJobNotFound       = errors.New("job not found")
+	ErrUnknownJobStatus  = errors.New("unknown job status")
 )

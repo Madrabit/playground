@@ -21,7 +21,7 @@ type CreateJobResponse struct {
 
 // JobResponse — публичное представление задачи.
 // Все поля присутствуют даже при zero value; пустые Attrs и Tags передаются как {}.
-// State — строковая запись номера состояния, сохранённая для совместимости API.
+// State содержит стабильное имя состояния: pending, running, failed, done, cancelled или stopped.
 type JobResponse struct {
 	ID          int                 `json:"id"`
 	Name        string              `json:"name"`

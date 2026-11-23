@@ -172,7 +172,7 @@ func TestHandleGetJobById(t *testing.T) {
 	}
 	assertJSONResponse(t, rec, `{
 		"id":42,"name":"test name","description":"test description",
-		"complexity":4,"attrs":{"priority":"high"},"tags":{"batch":{}},"state":"1"
+		"complexity":4,"attrs":{"priority":"high"},"tags":{"batch":{}},"state":"running"
 	}`)
 	var got httpdto.JobResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -188,7 +188,7 @@ func TestHandleGetJobById(t *testing.T) {
 		Complexity:  expected.Complexity,
 		Attrs:       expected.Attrs,
 		Tags:        expected.Tags,
-		State:       "1",
+		State:       "running",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)

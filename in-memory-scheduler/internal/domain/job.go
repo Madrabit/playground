@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -91,6 +92,59 @@ const (
 	Cancelled
 	Stopped
 )
+
+// String returns the stable JSON representation of a job status.
+func (s JobStatus) String() string {
+	switch s {
+	case Pending:
+		return "pending"
+	case Running:
+		return "running"
+	case Failed:
+		return "failed"
+	case Done:
+		return "done"
+	case Cancelled:
+		return "cancelled"
+	case Stopped:
+		return "stopped"
+	default:
+		return ""
+	}
+}
+
+// MarshalJSON encodes known statuses by name instead of exposing enum numbers.
+func (s JobStatus) MarshalJSON() ([]byte, error) {
+	name := s.String()
+	if name == "" {
+		return nil, fmt.Errorf("marshal job status %d: %w", s, ErrUnknownJobStatus)
+	}
+	return json.Marshal(name)
+}
+
+// UnmarshalJSON decodes only stable, known status names.
+func (s *JobStatus) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err != nil {
+		return fmt.Errorf("unmarshal job status: expected string: %w", err)
+	}
+	status, err := ParseJobStatus(name)
+	if err != nil {
+		return err
+	}
+	*s = status
+	return nil
+}
+
+// ParseJobStatus converts a public status name to the internal enum.
+func ParseJobStatus(name string) (JobStatus, error) {
+	for _, status := range [...]JobStatus{Pending, Running, Failed, Done, Cancelled, Stopped} {
+		if status.String() == name {
+			return status, nil
+		}
+	}
+	return 0, fmt.Errorf("unknown job status %q: %w", name, ErrUnknownJobStatus)
+}
 
 func (j *Job) Transition(to JobStatus) error {
 	switch j.State {

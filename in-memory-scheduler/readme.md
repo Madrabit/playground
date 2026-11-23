@@ -16,8 +16,8 @@ JSON-контракт определён в `internal/httpdto`; HTTP-обраб�
   Ответ: `{"name":"example"}`; `Scheduler.Add` пока не возвращает ID.
 - Ответ задачи: `id`, `name`, `description`, `complexity`, `attrs`, `tags`,
   `state`. `attrs` и `tags` — JSON-объекты, пустые коллекции возвращаются как `{}`.
-  Совместимый формат `state` — строковое число: `"0"` pending, `"1"` running,
-  `"2"` failed, `"3"` done, `"4"` cancelled, `"5"` stopped.
+  `state` — стабильная строка: `"pending"`, `"running"`, `"failed"`,
+  `"done"`, `"cancelled"` или `"stopped"`.
 - Ошибки обработчиков и middleware: `{"error":"message"}`.
 - `GET /stats`: `{"done":0,"failed":0,"cancelled":0}`.
   Поля ответов — значения без `omitempty`: нули и пустые строки не исчезают.

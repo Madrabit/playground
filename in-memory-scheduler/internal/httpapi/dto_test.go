@@ -122,12 +122,12 @@ func TestJobResponseStateAndZeroValues(t *testing.T) {
 		state domain.JobStatus
 		want  string
 	}{
-		{domain.Pending, "0"},
-		{domain.Running, "1"},
-		{domain.Failed, "2"},
-		{domain.Done, "3"},
-		{domain.Cancelled, "4"},
-		{domain.Stopped, "5"},
+		{domain.Pending, "pending"},
+		{domain.Running, "running"},
+		{domain.Failed, "failed"},
+		{domain.Done, "done"},
+		{domain.Cancelled, "cancelled"},
+		{domain.Stopped, "stopped"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {

@@ -93,7 +93,7 @@ func TestGetJobResponseContract(t *testing.T) {
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Body: io.NopCloser(strings.NewReader(
-						`{"id":42,"name":"job","description":"details","complexity":2,"attrs":{"env":"test"},"tags":{"batch":{}},"state":"1"}`,
+						`{"id":42,"name":"job","description":"details","complexity":2,"attrs":{"env":"test"},"tags":{"batch":{}},"state":"running"}`,
 					)),
 					Header:  make(http.Header),
 					Request: r,
@@ -113,7 +113,7 @@ func TestGetJobResponseContract(t *testing.T) {
 		Complexity:  2,
 		Attrs:       map[string]string{"env": "test"},
 		Tags:        map[string]struct{}{"batch": {}},
-		State:       "1",
+		State:       "running",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("job response = %#v, want %#v", got, want)

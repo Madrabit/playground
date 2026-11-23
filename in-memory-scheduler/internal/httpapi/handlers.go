@@ -33,7 +33,7 @@ func (j *JobHandler) handleCreateJob(
 	var req httpdto.CreateJobRequest
 
 	if err := decoder.Decode(&req); err != nil {
-		writeBodyError(w, err)
+		writeCreateJobDecodeError(w, err)
 		return
 	}
 
@@ -49,7 +49,7 @@ func (j *JobHandler) handleCreateJob(
 			return
 		}
 
-		writeBodyError(w, err)
+		writeCreateJobDecodeError(w, err)
 		return
 	}
 

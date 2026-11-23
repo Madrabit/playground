@@ -54,7 +54,7 @@ func TestWaitJobHTTPContract(t *testing.T) {
 			name:   "job response excludes internal fields",
 			id:     "42",
 			status: http.StatusOK,
-			body:   `{"id":42,"name":"test","description":"","complexity":0,"attrs":{},"tags":{},"state":"3"}`,
+			body:   `{"id":42,"name":"test","description":"","complexity":0,"attrs":{},"tags":{},"state":"done"}`,
 		},
 		{
 			name:   "invalid id",
