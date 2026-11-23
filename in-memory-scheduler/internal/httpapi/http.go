@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"playground/in-memory-scheduler/internal/domain"
@@ -11,6 +12,10 @@ type SchedulerAPI interface {
 	Add(job domain.Job) error
 	GetById(id int) (domain.Job, error)
 	Stats() scheduler.SchedulerStats
+}
+
+type JobStreamer interface {
+	StreamJobs(ctx context.Context, yield func(domain.Job) error) error
 }
 
 func ToHTTPStatus(err error) int {
@@ -47,6 +52,7 @@ func NewHttpHandler(isReady func() bool, scheduler SchedulerAPI) http.Handler {
 	})
 	mux.HandleFunc("POST /jobs", handler.handleCreateJob)
 	mux.HandleFunc("GET /jobs/{id}", handler.handleGetJob)
+	mux.HandleFunc("GET /jobs/export", handler.handleExportJobs)
 	mux.HandleFunc("GET /stats", handler.handleStats)
 	return mux
 }

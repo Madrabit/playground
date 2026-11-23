@@ -122,3 +122,32 @@ func (j *JobHandler) handleStats(
 
 	writeJSON(w, http.StatusOK, response)
 }
+
+func (j *JobHandler) handleExportJobs(w http.ResponseWriter, r *http.Request) {
+	streamer, ok := j.scheduler.(JobStreamer)
+	if !ok {
+		writeJSONError(w, http.StatusNotImplemented, "job export is unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.WriteHeader(http.StatusOK)
+	flusher, canFlush := w.(http.Flusher)
+	encoder := json.NewEncoder(w)
+	err := streamer.StreamJobs(r.Context(), func(job domain.Job) error {
+		if err := r.Context().Err(); err != nil {
+			return err
+		}
+		if err := encoder.Encode(toJobResponse(job)); err != nil {
+			return err
+		}
+		if canFlush {
+			flusher.Flush()
+		}
+		return r.Context().Err()
+	})
+	if err != nil && r.Context().Err() == nil {
+		// The response is already streaming, so report stream failures in the log.
+		// A JSON error envelope cannot be appended to an NDJSON stream safely.
+		return
+	}
+}

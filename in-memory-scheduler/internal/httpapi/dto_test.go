@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -25,15 +26,25 @@ func assertJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, want strin
 
 func assertJSONObject(t *testing.T, body []byte, want string) {
 	t.Helper()
-	var gotJSON, wantJSON map[string]any
+	var gotJSON, wantJSON map[string]json.RawMessage
 	if err := json.Unmarshal(body, &gotJSON); err != nil {
 		t.Fatalf("decode JSON: %v; body = %q", err, body)
 	}
 	if err := json.Unmarshal([]byte(want), &wantJSON); err != nil {
 		t.Fatalf("invalid expected JSON: %v", err)
 	}
-	if !reflect.DeepEqual(gotJSON, wantJSON) {
-		t.Errorf("JSON = %s, want %s", body, want)
+	if len(gotJSON) != len(wantJSON) {
+		t.Errorf("JSON has %d fields, want %d: %s", len(gotJSON), len(wantJSON), body)
+	}
+	for key, wantValue := range wantJSON {
+		gotValue, ok := gotJSON[key]
+		if !ok {
+			t.Errorf("JSON is missing field %q: %s", key, body)
+			continue
+		}
+		if !reflect.DeepEqual(bytes.TrimSpace(gotValue), bytes.TrimSpace(wantValue)) {
+			t.Errorf("JSON field %q = %s, want %s", key, gotValue, wantValue)
+		}
 	}
 }
 

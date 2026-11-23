@@ -7,6 +7,7 @@ import (
 	"playground/in-memory-scheduler/internal/domain"
 	"playground/in-memory-scheduler/internal/storage"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -450,6 +451,25 @@ func (s *Scheduler) GetById(ID int) (domain.Job, error) {
 		return domain.Job{}, fmt.Errorf("scheduler GetById: jobID %d %w", ID, err)
 	}
 	return job, nil
+}
+
+// StreamJobs visits a snapshot of job IDs and loads each job individually.
+func (s *Scheduler) StreamJobs(ctx context.Context, yield func(domain.Job) error) error {
+	ids := s.reader.ListIDs()
+	slices.Sort(ids)
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		job, err := s.reader.GetByID(id)
+		if err != nil {
+			return fmt.Errorf("stream job %d: %w", id, err)
+		}
+		if err := yield(job); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
 }
 
 func (s *Scheduler) ActiveWorkers() []int {

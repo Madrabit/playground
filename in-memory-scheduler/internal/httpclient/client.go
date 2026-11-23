@@ -150,6 +150,55 @@ func (c *Client) GetStats(
 	return stats, err
 }
 
+// ExportJobs decodes an NDJSON export one job at a time. The callback can stop
+// processing by returning an error; ctx cancellation also interrupts reading.
+func (c *Client) ExportJobs(
+	ctx context.Context,
+	yield func(httpdto.JobResponse) error,
+) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/jobs/export", nil)
+	if err != nil {
+		return fmt.Errorf("create export request: %w", err)
+	}
+	req.Header.Set("Accept", "application/x-ndjson")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("execute export request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes+1))
+		if readErr != nil {
+			return fmt.Errorf("read export error response: %w", readErr)
+		}
+		message := strings.TrimSpace(string(data))
+		if len(message) > maxErrorBodyBytes {
+			message = message[:maxErrorBodyBytes]
+		}
+		return &HTTPError{StatusCode: resp.StatusCode, Body: message}
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/x-ndjson") {
+		return fmt.Errorf("unexpected export content type %q", got)
+	}
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var job httpdto.JobResponse
+		err := decoder.Decode(&job)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("decode exported job: %w", err)
+		}
+		if err := yield(job); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+}
+
 // Общий метод выполнения HTTP-запросов.
 func (c *Client) doJSON(
 	ctx context.Context,

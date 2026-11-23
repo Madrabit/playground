@@ -2,16 +2,33 @@
 package httpclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"playground/in-memory-scheduler/internal/httpdto"
 )
+
+func equalJSONFields(a, b map[string]json.RawMessage) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, want := range b {
+		got, ok := a[key]
+		if !ok || !bytes.Equal(bytes.TrimSpace(got), bytes.TrimSpace(want)) {
+			return false
+		}
+	}
+	return true
+}
 
 func TestCreateJobRequestContract(t *testing.T) {
 	zero := 0
@@ -45,14 +62,14 @@ func TestCreateJobRequestContract(t *testing.T) {
 							t.Errorf("Content-Type = %q, want application/json", got)
 						}
 						defer r.Body.Close()
-						var got, want map[string]any
+						var got, want map[string]json.RawMessage
 						if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 							t.Fatalf("decode request: %v", err)
 						}
 						if err := json.Unmarshal([]byte(tt.wantBody), &want); err != nil {
 							t.Fatalf("decode expected request: %v", err)
 						}
-						if !reflect.DeepEqual(got, want) {
+						if !equalJSONFields(got, want) {
 							t.Errorf("request body = %#v, want %#v", got, want)
 						}
 						return &http.Response{
@@ -79,6 +96,49 @@ func TestCreateJobRequestContract(t *testing.T) {
 				t.Errorf("response name = %q, want job", got.Name)
 			}
 		})
+	}
+}
+
+func TestExportJobsStreamsAndStopsOnContextCancellation(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		flusher := w.(http.Flusher)
+		_, _ = io.WriteString(w, `{"id":1,"name":"first","description":"","complexity":0,"attrs":{},"tags":{},"state":"pending"}`+"\n")
+		flusher.Flush()
+		close(started)
+		<-r.Context().Done()
+		close(release)
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var got int
+	err = client.ExportJobs(ctx, func(job httpdto.JobResponse) error {
+		got++
+		if job.Name != "first" {
+			t.Errorf("job = %q, want first", job.Name)
+		}
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ExportJobs error = %v, want context.Canceled", err)
+	}
+	if got != 1 {
+		t.Fatalf("callback called %d times, want once", got)
+	}
+	<-started
+	select {
+	case <-release:
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not observe cancellation")
 	}
 }
 
